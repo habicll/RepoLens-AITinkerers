@@ -83,6 +83,14 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     await panel.getByRole("button", { name: "Close source" }).click();
     await panel.getByRole("button", { name: /Propose a solution/ }).click();
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toBeVisible();
+    await expect(panel.getByRole("heading", { name: "Review the proposed patch" })).toHaveCount(0);
+    await panel.getByRole("button", { name: /Implement solution/ }).click();
+    await expect(panel.getByRole("heading", { name: "Review the proposed patch" })).toBeVisible();
+    await panel.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+    const downloadStarted = github.waitForEvent("download");
+    await panel.getByRole("button", { name: "Download", exact: true }).click();
+    expect((await downloadStarted).suggestedFilename()).toBe("test-owner-test-repo-184-repolens.patch");
     await github.screenshot({ path: testInfo.outputPath("extension-solution.png"), fullPage: false });
 
     await github.goto(slowIssue);
@@ -109,14 +117,14 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     await github.screenshot({ path: testInfo.outputPath("extension-briefing.png"), fullPage: false });
 
     expect(runs.map(run => [run.forwardedProps.intent, run.forwardedProps.issue.url])).toEqual([
-      ["understand", firstIssue], ["propose_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue],
+      ["understand", firstIssue], ["propose_solution", firstIssue], ["implement_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue],
     ]);
     for (const run of runs) {
       const currentIssue = run.context?.find(item => item.description === "Current GitHub issue");
       expect(currentIssue).toBeDefined();
       expect(JSON.parse(currentIssue!.value).url).toBe(run.forwardedProps.issue.url);
     }
-    expect(runs[0].threadId).not.toBe(runs[3].threadId);
+    expect(runs[0].threadId).not.toBe(runs[4].threadId);
     expect(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.url)).toBe(nextIssue);
     expect(await panel.locator("html").evaluate(() => (window as Window & { __extensionCspViolations?: string[] }).__extensionCspViolations ?? [])).toEqual([]);
     expect(cspErrors).toEqual([]);

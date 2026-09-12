@@ -17,6 +17,7 @@ export interface ServerConfig {
   githubToken?: string;
   allowedRepos?: string[];
   extensionId?: string;
+  runLimitPerMinute?: number;
 }
 
 export function readConfig(): ServerConfig {
@@ -79,7 +80,7 @@ export function createApp(config: ServerConfig, agent: AbstractAgent = new RepoL
     if (req.method !== "POST") { next(); return; }
     const now = Date.now();
     while (runStarts.length && runStarts[0]! < now - 60_000) runStarts.shift();
-    if (runStarts.length >= 10) {
+    if (runStarts.length >= (config.runLimitPerMinute ?? 10)) {
       res.setHeader("Retry-After", "60");
       res.status(429).json({ error: { code: "RATE_LIMITED", message: "Too many analyses. Please retry in a minute." } });
       return;

@@ -16,7 +16,7 @@ class FixtureAgent extends AbstractAgent {
       if (!issue) { observer.error(new Error("Missing test issue")); return; }
       observer.next({ type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId });
       const state = fixtureState(issue, input.runId);
-      if (props.intent !== "propose_solution") {
+      if (props.intent === "understand") {
         observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: { ...state, analysis: null, analysisId: null, status: "loading", phase: "Reading GitHub comments" } });
       }
       const timer = setTimeout(() => {
@@ -25,11 +25,21 @@ class FixtureAgent extends AbstractAgent {
           state.analysis = null;
           state.analysisId = null;
           state.error = { code: "PERMISSION_DENIED", message: "This repository is private or unavailable.", retryable: false };
-        } else if (props.intent === "propose_solution") {
+        } else if (props.intent === "propose_solution" || props.intent === "implement_solution") {
           state.solution = {
             status: "proposed", approach: { text: "Normalize the OAuth identity before session validation.", sourceIds: ["file-1", "file-2"] }, assumptions: ["Both readers must share the same identity field."],
             steps: [{ title: "Align the session identity", detail: "Use a consistent field between the callback and middleware.", files: ["src/auth/callback.ts", "src/auth/middleware.ts"], validation: "Add a sign-in regression test.", sourceIds: ["file-1", "file-2"] }], risks: [], openQuestions: [],
           };
+          if (props.intent === "implement_solution") {
+            state.implementation = {
+              status: "drafted",
+              summary: { text: "Use the identity field already consumed by the session middleware.", sourceIds: ["file-1", "file-2"] },
+              files: [{ path: "src/auth/callback.ts", explanation: "Store the OAuth identity under userId.", sourceIds: ["file-2"] }],
+              patch: "diff --git a/src/auth/callback.ts b/src/auth/callback.ts\n--- a/src/auth/callback.ts\n+++ b/src/auth/callback.ts\n@@ -8,2 +8,2 @@\n- session.sub = identity.id;\n+ session.userId = identity.id;",
+              validationCommands: [],
+              notes: ["Review and test this draft before applying it."],
+            };
+          }
         }
         observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: state });
         observer.next({ type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId });
@@ -40,4 +50,4 @@ class FixtureAgent extends AbstractAgent {
   }
 }
 
-createApp({ port: 3001, host: "127.0.0.1", model: "test-fixture", openaiApiKey: "test-only", githubToken: "test-only" }, new FixtureAgent()).listen(3001, "127.0.0.1", () => console.log("Test fixture server ready (no external calls)"));
+createApp({ port: 3001, host: "127.0.0.1", model: "test-fixture", openaiApiKey: "test-only", githubToken: "test-only", runLimitPerMinute: 100 }, new FixtureAgent()).listen(3001, "127.0.0.1", () => console.log("Test fixture server ready (no external calls)"));

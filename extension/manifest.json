@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Understand a GitHub issue, its discussion and the relevant code.",
   "minimum_chrome_version": "116",
+  "permissions": ["clipboardWrite"],
   "host_permissions": ["https://github.com/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Open RepoLens" },

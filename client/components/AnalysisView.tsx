@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUpRight, BookOpen, Check, ChevronDown, CircleHelp, FileCode2, FlaskConical, GitBranch, Info, Link2, MessageSquare, Terminal, X } from "lucide-react";
-import type { Analysis, Claim, Coverage, Snapshot, Solution, Source } from "../../shared/contracts";
+import { ArrowUpRight, BookOpen, Check, ChevronDown, CircleHelp, Copy, Download, FileCode2, FlaskConical, GitBranch, Info, Link2, MessageSquare, Terminal, X } from "lucide-react";
+import type { Analysis, Claim, Coverage, ImplementationDraft, IssueRef, Snapshot, Solution, Source } from "../../shared/contracts";
 
 const EvidenceContext = createContext<{ sources: Source[]; select: (source: Source) => void }>({ sources: [], select: () => undefined });
 
@@ -111,6 +111,41 @@ export function SolutionView({ solution, sources }: { solution: Solution; source
     {solution.steps.length > 0 && <div className="plan"><h3>Implementation plan</h3>{solution.steps.map((step, index) => <article className="plan-step" key={index}><span className="step-number">{index + 1}</span><div><h4>{step.title}</h4><p>{step.detail}</p>{step.files.length > 0 && <div className="plan-files">{step.files.map((file) => <code key={file}>{file}</code>)}</div>}<p className="validation"><Check size={14} /><span><strong>Validate:</strong> {step.validation}</span></p><SourceChips ids={step.sourceIds} /></div></article>)}</div>}
     {solution.risks.length > 0 && <div className="solution-notes"><h3>Risks to check</h3><ul className="plain-list">{solution.risks.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
     {solution.openQuestions.length > 0 && <div className="solution-notes"><h3>Open questions</h3><ul className="plain-list">{solution.openQuestions.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+  </section></EvidenceScope>;
+}
+
+export function ImplementationView({ implementation, sources, issue }: { implementation: ImplementationDraft; sources: Source[]; issue: IssueRef }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
+  const copyPatch = async () => {
+    try {
+      await navigator.clipboard.writeText(implementation.patch);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    window.clearTimeout(resetTimer.current);
+    resetTimer.current = window.setTimeout(() => setCopyState("idle"), 1600);
+  };
+  const downloadPatch = () => {
+    const href = URL.createObjectURL(new Blob([implementation.patch], { type: "text/x-diff;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `${issue.owner}-${issue.repo}-${issue.number}-repolens.patch`;
+    link.click();
+    URL.revokeObjectURL(href);
+  };
+  return <EvidenceScope sources={sources}><section className="implementation-card" aria-labelledby="implementation-heading">
+    <div className="implementation-heading"><div><span className="eyebrow">IMPLEMENTATION DRAFT</span><h2 id="implementation-heading">Review the proposed patch</h2></div><span className="detail-badge">Not applied · Not tested</span></div>
+    <ClaimText claim={implementation.summary} className="implementation-summary" />
+    {implementation.status === "needs_more_information" ? <p className="inline-note"><Info size={15} /> The inspected excerpts are not sufficient to draft an exact patch.</p> : <>
+      <div className="implementation-files">{implementation.files.map(file => <article key={file.path}><code>{file.path}</code><p>{file.explanation}</p><SourceChips ids={file.sourceIds} /></article>)}</div>
+      <div className="patch-toolbar"><span>Unified diff</span><div><button type="button" onClick={() => void copyPatch()}><Copy size={13} />{copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}</button><button type="button" onClick={downloadPatch}><Download size={13} />Download</button></div></div>
+      <pre className="patch-preview"><code>{implementation.patch}</code></pre>
+      {implementation.validationCommands.length > 0 && <div className="implementation-notes"><h3>Suggested validation · not executed</h3>{implementation.validationCommands.map(command => <code key={command}>{command}</code>)}</div>}
+    </>}
+    {implementation.notes.length > 0 && <div className="implementation-notes"><h3>Before applying</h3><ul className="plain-list">{implementation.notes.map((note, index) => <li key={index}>{note}</li>)}</ul></div>}
   </section></EvidenceScope>;
 }
 

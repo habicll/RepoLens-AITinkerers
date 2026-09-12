@@ -18,6 +18,7 @@ test("real CopilotKit transport renders evidence and gates the solution", async 
   await expect(page.getByText("The OAuth callback succeeds, but the session is rejected immediately after sign-in.")).toBeVisible();
   await expect(page.getByText("Working hypothesis", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Proposed solution", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Implement solution/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Read source: Comment #21", exact: true }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("dialog").getByText(/I verified the callback URL/)).toBeVisible();
@@ -26,6 +27,11 @@ test("real CopilotKit transport renders evidence and gates the solution", async 
   await page.getByRole("button", { name: /Propose a solution/ }).click();
   await expect(page.getByRole("heading", { name: "Proposed solution", exact: true })).toBeVisible();
   await expect(page.getByText("Normalize the OAuth identity before session validation.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Implement solution/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Review the proposed patch" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Implement solution/ }).click();
+  await expect(page.getByRole("heading", { name: "Review the proposed patch" })).toBeVisible();
+  await expect(page.getByText("session.userId = identity.id", { exact: false })).toBeVisible();
   expect(errors).toEqual([]);
   await page.screenshot({ path: "test-results/briefing-desktop.png", fullPage: true });
 });
