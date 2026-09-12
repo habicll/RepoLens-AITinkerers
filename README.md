@@ -4,12 +4,13 @@
 
 RepoLens (initialement appelé IssueLens) aide à comprendre un repository ou une issue avant de commencer à travailler. Depuis une vraie page GitHub, ouvrez la fenêtre flottante sombre et cliquez sur **Understand** : sur la racine du repository, l'agent explique le README ; sur une issue, il lit la discussion, explore quelques fichiers et produit une fiche sourcée.
 
-Les observations trouvées dans GitHub sont distinguées des hypothèses du modèle. Un deuxième clic sur **Propose a solution** produit une approche et un plan. Quand ce plan est suffisamment concret, **Implement solution** génère un patch à relire, copier ou télécharger. RepoLens ne l'applique pas et n'exécute pas les tests.
+Les observations trouvées dans GitHub sont distinguées des hypothèses du modèle. **Investigate issue** lance à la demande une enquête sur les changements qui précèdent le signalement. **Propose a solution** produit ensuite une approche et un plan. Quand ce plan est suffisamment concret, **Implement solution** génère un patch à relire, copier ou télécharger. RepoLens ne l'applique pas et n'exécute pas les tests.
 
 ## Fonctionnalités du MVP
 
 - Détection de l'issue ouverte, sans copier son contenu.
-- Détection de la page racine d'un repository et briefing du README : but, audience, concepts, architecture et démarrage rapide.
+- Détection de la page racine d'un repository et briefing très court du README : but, audience et trois concepts essentiels au maximum.
+- Box Bash immédiatement visible avec la recette Node/npm déterministe, prête à copier dans un terminal.
 - Description, labels, assignees, milestone et commentaires récupérés avec GitHub REST.
 - README et code lus à un commit fixé pour toute l'analyse.
 - Exploration progressive avec trois outils : vue du repository, recherche et lecture de fichier.
@@ -18,6 +19,8 @@ Les observations trouvées dans GitHub sont distinguées des hypothèses du mod�
 - Extraits et liens vers l'issue, les commentaires et les lignes de code.
 - Reproduction, lancement et contexte supplémentaire repliables.
 - Proposition de solution uniquement après une analyse terminée et un clic explicite.
+- Issue Forensics uniquement après un clic explicite : fenêtre de sept jours, commits/PR récents, timeline, CI, déploiements, preuves et confiance qualitative.
+- Séparation visuelle entre faits GitHub et inférences causales ; aucun responsable n'est inventé quand les preuves sont faibles.
 - Brouillon d'implémentation uniquement après une solution concrète : diff borné aux fichiers inspectés, jamais appliqué automatiquement.
 - Progression, annulation, erreurs, accès refusé et configuration manquante.
 - Proposition facultative de lancement local pour les projets Node/npm reconnus : commandes visibles, consentement explicite, logs en direct, URL locale et bouton Stop.
@@ -34,6 +37,7 @@ CopilotKit v2 — état partagé et transport AG-UI
         ▼
 Express local → RepoLensAgent
         ├── GitHub REST : collecte bornée et sources au SHA
+        ├── Forensics : timeline + score déterministe + comparaison sémantique
         ├── OpenAI Responses : outils puis sorties structurées
         └── Lanceur local optionnel : git/npm, processus et logs
 ```
@@ -67,6 +71,7 @@ Renseignez `OPENAI_API_KEY` dans `.env`. Ce fichier est ignoré par Git. **Ne me
 | `PORT` | Port du backend, `3001` par défaut. |
 | `HOST` | Adresse locale, `127.0.0.1` par défaut. Le MVP refuse une écoute publique. |
 | `GITHUB_ALLOWED_REPOS` | Liste facultative `owner/repo,other/repo` limitant la démo. |
+| `FORENSICS_WINDOW_DAYS` | Nombre de jours inspectés avant la création d'une issue, de 1 à 30 ; défaut `7`. |
 | `EXTENSION_ID` | Facultatif : restreint l'accès à l'ID de l'extension Chrome chargée. |
 | `VITE_API_URL` | Adresse publique du backend, `http://127.0.0.1:3001`. Aucun secret. |
 | `ENABLE_LOCAL_EXECUTION` | `false` par défaut. Mettre `true` autorise l'affichage du bouton de lancement contrôlé. |
@@ -98,9 +103,10 @@ npm start
 3. Rechargez l'extension après chaque nouveau build. Épingler RepoLens dans la barre d'outils est facultatif.
 4. Ouvrez une vraie page `https://github.com/owner/repo` ou `https://github.com/owner/repo/issues/123`.
 5. Cliquez sur le bouton RepoLens en bas à droite de GitHub, ou sur l'icône de l'extension : la fenêtre flottante reconnaît le repository ou l'issue.
-6. Cliquez **Understand** et inspectez les sources à côté des affirmations. Sur la page racine, RepoLens résume le README et les commandes documentées.
-7. Cliquez **Propose a solution** quand vous souhaitez passer au plan.
-8. Si la solution est concrète, cliquez **Implement solution** pour générer un patch. Relisez-le avant de le copier ou le télécharger.
+6. Cliquez **Understand** et inspectez les sources à côté des affirmations. Sur la page racine, RepoLens résume le README et affiche une box Bash copiable.
+7. Sur une issue, cliquez **Investigate issue** pour reconstruire les changements, CI et déploiements antérieurs. Revenez au briefing avec **Back to overview**.
+8. Cliquez **Propose a solution** quand vous souhaitez passer au plan.
+9. Si la solution est concrète, cliquez **Implement solution** pour générer un patch. Relisez-le avant de le copier ou le télécharger.
 
 Le backend doit rester lancé. Après un nouveau build, rechargez l'extension dans `chrome://extensions`.
 
@@ -120,6 +126,14 @@ Redémarrez ensuite RepoLens et relancez **Understand**. Avant toute exécution,
 
 Le code du repository s'exécute avec les permissions du compte local. Le lanceur lui transmet un environnement minimal et un `HOME` temporaire ; il ne transmet pas `OPENAI_API_KEY`, `GITHUB_TOKEN` ni les autres variables du serveur. Ce mécanisme n'est pas une sandbox. N'autorisez que des repositories que vous acceptez d'exécuter sur cette machine.
 
+## Issue Forensics
+
+Forensics ne démarre jamais avec l'analyse normale. Après le clic **Investigate issue**, le serveur prend la date de création comme premier signalement et inspecte la fenêtre précédente configurée. Il récupère au maximum 40 commits, détaille les six meilleurs et cherche une PR associée pour les quatre premiers. Timeline, commits et PR utilisent les APIs GitHub principales ; Actions et déploiements enrichissent le résultat quand les droits le permettent.
+
+Le score de base est calculé dans le code avec la proximité temporelle, les chemins modifiés, les références de la timeline, un échec CI et la présence dans un déploiement. OpenAI reçoit ensuite un contexte compact pour comparer le sens de l'issue aux titres, messages et chemins. Cette passe ajoute uniquement la pertinence sémantique et le résumé. L'interface affiche `HIGH`, `MEDIUM` ou `LOW`, jamais un pourcentage artificiel.
+
+Un candidat `LOW` ne devient pas automatiquement un coupable. En l'absence de signal suffisant, la vue indique **No strong evidence found**. Les échecs Actions, déploiements ou OpenAI restent isolés : le briefing normal demeure accessible.
+
 ## Provenance et limites
 
 L'agent ne reçoit pas tout le repository. La collecte limite notamment les commentaires (100 et 24 000 caractères), les fichiers (6, README compris), les lectures (160 lignes par extrait, fichier de 100 Ko maximum) et le texte total des sources (64 000 caractères). Le workflow limite les appels modèle à 6, les outils à 10 et un run à 90 secondes.
@@ -130,7 +144,7 @@ La validation des citations vérifie qu'une source a été récupérée et que l
 
 Les commentaires, README et fichiers sont traités comme des données non fiables. Ils ne peuvent créer aucune commande. « Implement » génère uniquement du texte au format patch dans la mémoire du navigateur. Le lancement local utilise exclusivement la recette `git`/`npm` déterminée par le serveur et l'autorisation de l'utilisateur. Les logs d'analyse contiennent les étapes, compteurs, durées et erreurs normalisées, sans clé ni corps des sources.
 
-Les réponses GitHub publiques sont mises en cache brièvement ; les fichiers sont associés au SHA. Les analyses nécessaires au second clic expirent après 15 minutes et disparaissent au redémarrage. Une analyse d'une vieille issue porte sur le commit affiché, qui peut différer de la version affectée.
+Les réponses GitHub publiques sont mises en cache brièvement ; les fichiers sont associés au SHA. Les analyses nécessaires aux actions suivantes expirent après 15 minutes et disparaissent au redémarrage. Une analyse d'une vieille issue porte sur le commit affiché, qui peut différer de la version affectée.
 
 Les appels OpenAI utilisent `store: false`. Cela ne constitue pas une garantie d'absence totale de rétention côté fournisseur.
 
@@ -145,9 +159,9 @@ npm run test:e2e
 npm run check:secrets
 ```
 
-Les tests unitaires vérifient les accès, budgets, citations, changements de contexte et transitions. Les tests navigateur utilisent **le vrai runtime CopilotKit** avec un agent de test synthétique, sans appel externe. Ces données ne sont jamais chargées par l'application normale.
+Les tests unitaires vérifient les accès, budgets, citations, changements de contexte, scoring Forensics, endpoints bornés et transitions. Les tests navigateur utilisent **le vrai runtime CopilotKit** avec un agent de test synthétique, sans appel externe. Ces données ne sont jamais chargées par l'application normale.
 
-Le test extension charge le worker MV3 et le bundle dans Chromium, injecte la fenêtre flottante dans une page GitHub, détecte les changements d'issue et vérifie la CSP. Il parcourt Understand → Propose → Implement, puis vérifie la copie et le téléchargement du patch.
+Le test extension charge le worker MV3 et le bundle dans Chromium, injecte la fenêtre flottante dans une page GitHub, détecte les changements d'issue et vérifie la CSP. Il parcourt Understand → Investigate → Propose → Implement, puis vérifie les liens GitHub, la copie et le téléchargement.
 
 Arrêtez `npm run dev` ou `npm start` avant les tests navigateur : ils démarrent leurs propres serveurs sur les ports 3001 et 5173.
 
@@ -176,6 +190,6 @@ Le provider CopilotKit installé embarque aussi des composants différés inutil
 
 ## Construit pendant le hackathon
 
-Le dépôt initial ne contenait que son titre. Le travail comprend le challenge de la V1, le périmètre V2, la collecte GitHub, l'agent OpenAI, l'intégration CopilotKit, l'interface sourcée, l'extension Chrome, les tests et la documentation. Les étapes sont enregistrées par commits sur `feat/mvp-issue-context`.
+Le dépôt initial ne contenait que son titre. Le travail comprend le challenge de la V1, le périmètre V2, la collecte GitHub, l'agent OpenAI, l'intégration CopilotKit, l'interface sourcée, Issue Forensics, le briefing README avec box Bash, l'extension Chrome, les tests et la documentation. Les étapes sont enregistrées par commits sur `feat/mvp-issue-context`.
 
 Voir [le plan challengé](docs/plan.md) et [la recette de démonstration](docs/demo.md).
