@@ -32,6 +32,7 @@ test("real CopilotKit transport renders evidence and gates the solution", async 
   await expect(page.getByRole("heading", { name: "Facts", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Inferences", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open PR #461", exact: true })).toHaveAttribute("href", "https://github.com/test-owner/test-repo/pull/461");
+  await page.screenshot({ path: "test-results/forensics-desktop.png", fullPage: true });
   await page.getByRole("button", { name: "Back to overview" }).click();
   await expect(page.getByRole("heading", { name: "The problem", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Propose a solution/ }).click();
@@ -70,7 +71,11 @@ test("repository root becomes a sourced README briefing before local execution",
   await page.getByRole("button", { name: "Understand", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What this project is" })).toBeVisible();
   await expect(page.getByText("RepoLens turns GitHub context into a concise, source-backed engineering briefing.")).toBeVisible();
-  await expect(page.getByText("Quick start from the README")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Paste this into your terminal" })).toBeVisible();
+  await expect(page.locator(".run-commands pre")).toContainText("git clone");
+  await expect(page.locator(".run-commands pre")).toContainText("npm run dev");
+  await page.locator(".run-commands").getByRole("button", { name: "Copy", exact: true }).click();
+  await expect(page.locator(".run-commands").getByRole("button", { name: "Copied", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Launch this project on this computer" })).toBeVisible();
   await expect(page.getByText(/Local execution is disabled/).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Launch project/ })).toHaveCount(0);

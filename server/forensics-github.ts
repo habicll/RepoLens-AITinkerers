@@ -178,6 +178,7 @@ export class GitHubForensicsRepository {
     if (timelineResult.data.length === 100) limits.push("Only the first 100 issue timeline events were considered.");
     if (actionsResult.state !== "available") limits.push(actionsResult.state === "permission_denied" ? "GitHub Actions was not accessible with the configured permissions." : "GitHub Actions data was unavailable.");
     if (deploymentsResult.state !== "available") limits.push(deploymentsResult.state === "permission_denied" ? "Deployments were not accessible with the configured permissions." : "Deployment data was unavailable.");
+    else if (Array.isArray(deploymentsResult.data) && deploymentsResult.data.length === 100) limits.push("Only the latest 100 deployments were available; an older deployment in this window may be missing.");
     return {
       timeline, commits, workflows, deployments, sources: uniqueSources(sources),
       coverage: {

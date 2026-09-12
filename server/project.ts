@@ -199,9 +199,10 @@ export class GitHubProject implements ProjectReader {
       status: this.options.localExecutionEnabled ? "available" : "disabled",
       runtime: "Node.js + npm",
       commands: [
-        `git clone --filter=blob:none --no-checkout https://github.com/${this.fullName}.git <temporary-workspace>`,
-        `git -C <temporary-workspace> fetch --depth 1 origin ${commitSha}`,
-        "git -C <temporary-workspace> checkout --detach FETCH_HEAD",
+        `git clone --filter=blob:none --no-checkout https://github.com/${this.fullName}.git ${this.ref.repo}`,
+        `cd ${this.ref.repo}`,
+        `git fetch --depth 1 origin ${commitSha}`,
+        "git checkout --detach FETCH_HEAD",
         `npm ${installArgs.join(" ")}`,
         `npm run ${script}`,
       ],

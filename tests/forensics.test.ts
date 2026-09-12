@@ -72,6 +72,23 @@ describe("Forensics analysis", () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it("keeps an unrelated candidate low and explicitly reports no strong evidence", async () => {
+    const unrelated = { sha: "c".repeat(40), message: "update contributor guide", timestamp: "2026-09-06T09:42:00.000Z", author: "docs", url: "https://github.com/demo/project/commit/ccccccc" };
+    const evidence: Source = { id: `commit:${unrelated.sha}`, kind: "commit", label: "Commit ccccccc", url: unrelated.url, createdAt: unrelated.timestamp, excerpt: "Update contributor guide. Changed docs/contributing.md." };
+    const lowReader: ForensicsReader = {
+      collect: async () => seed([unrelated]),
+      inspect: async () => ({ commits: [{ ...unrelated, files: ["docs/contributing.md"], sourceId: evidence.id, pull: null }], deployments: [], sources: [evidence], pullRequestsFound: 0 }),
+    };
+    const complete = vi.fn<Complete>().mockResolvedValue(modelResponse({ summary: { text: "The available change is not semantically related to the authentication report.", sourceIds: [evidence.id, "issue-1"] },
+      assessments: [{ candidateId: "candidate:commit-cccccccccccc", semanticRelevance: "low", inference: "The documentation update is unlikely to explain the session failure.", sourceIds: [evidence.id, "issue-1"] }], inferences: [] }));
+    const result = await investigateIssue({ issue, metadata: state.metadata, analysis: state.analysis!, sources: state.sources, reader: lowReader, windowDays: 7,
+      model: "test", complete, signal: new AbortController().signal, counts: { modelCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0 }, report: () => undefined });
+    expect(result.result.status).toBe("no_strong_evidence");
+    expect(result.result.mostLikelyCandidateId).toBeNull();
+    expect(result.result.candidates[0]?.confidence).toBe("low");
+    expect(result.result.summary.text).toContain("No strong regression candidate");
+  });
+
   it("shortlists a small relevant window instead of inspecting every commit", () => {
     const commits = Array.from({ length: 20 }, (_, index) => ({ sha: index.toString(16).padStart(40, "a"), message: index === 18 ? "OAuth middleware session regression" : `documentation update ${index}`,
       timestamp: new Date(Date.parse(issueCreatedAt) - (index + 1) * 3_600_000).toISOString(), author: "dev", url: `https://github.com/demo/project/commit/${index}` }));

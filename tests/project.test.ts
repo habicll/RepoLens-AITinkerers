@@ -31,6 +31,8 @@ describe("repository briefing collection", () => {
     expect(project.recipe?.install.args).toEqual(["ci"]);
     expect(project.recipe?.start.args).toEqual(["run", "dev"]);
     expect(project.proposal.commands.at(-1)).toBe("npm run dev");
+    expect(project.proposal.commands).toContain("cd readable");
+    expect(project.proposal.commands.join("\n")).not.toContain("<temporary-workspace>");
     expect(JSON.parse(project.evidence())).toMatchObject({ repository: ref, snapshot: { commitSha } });
   });
 
@@ -39,5 +41,6 @@ describe("repository briefing collection", () => {
     await project.bootstrap();
     expect(project.proposal.status).toBe("disabled");
     expect(project.proposal.commands).toContain("npm run dev");
+    expect(project.proposal.commands[0]).toContain("git clone");
   });
 });

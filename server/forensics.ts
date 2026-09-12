@@ -80,7 +80,7 @@ function buildCandidate(commit: ForensicsCommitDetail, seed: ForensicsSeed, depl
 
   const pathMatch = changedPathScore(commit.files, relevantPaths, issueTerms);
   if (pathMatch.score) { score += pathMatch.score; signals.push("path"); }
-  if (commit.files.length) facts.push({ text: `${pull ? `PR #${pull.number}` : `Commit ${commit.sha.slice(0, 7)}`} changed ${commit.files.length} inspected file${commit.files.length === 1 ? "" : "s"}${pathMatch.paths.length ? `, including ${pathMatch.paths.slice(0, 3).join(", ")}` : ""}.`, sourceIds: [commit.sourceId, ...(pull ? [pull.sourceId] : [])] });
+  if (commit.files.length) facts.push({ text: `Associated commit ${commit.sha.slice(0, 7)} changed ${commit.files.length} inspected file${commit.files.length === 1 ? "" : "s"}${pathMatch.paths.length ? `, including ${pathMatch.paths.slice(0, 3).join(", ")}` : ""}.`, sourceIds: [commit.sourceId, ...(pull ? [pull.sourceId] : [])] });
 
   const referenced = seed.timeline.filter(event => event.commitSha === commit.sha || (pull && event.pullNumber === pull.number));
   if (referenced.length) {
@@ -141,7 +141,15 @@ export async function investigateIssue(options: {
   const shortlist = shortlistCommits(seed, options.analysis, options.metadata, issueCreatedAt);
   const inspection = await options.reader.inspect(shortlist, seed.deployments, options.report);
   const allSources = uniqueSources([...options.sources, ...seed.sources, ...inspection.sources]);
-  let drafts = inspection.commits.map(commit => buildCandidate(commit, seed, inspection.deployments, options.analysis, options.metadata, issueCreatedAt));
+  let drafts = [...inspection.commits.map(commit => buildCandidate(commit, seed, inspection.deployments, options.analysis, options.metadata, issueCreatedAt))
+    .reduce((byId, candidate) => {
+      const previous = byId.get(candidate.id);
+      if (!previous) byId.set(candidate.id, candidate);
+      else byId.set(candidate.id, { ...previous, score: Math.max(previous.score, candidate.score),
+        facts: uniqueClaims([...previous.facts, ...candidate.facts], 6), changedFiles: unique([...previous.changedFiles, ...candidate.changedFiles]).slice(0, 12),
+        signals: unique([...previous.signals, ...candidate.signals]), });
+      return byId;
+    }, new Map<string, CandidateDraft>()).values()];
   drafts.sort((a, b) => b.score - a.score || Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
   if (drafts.length) {
@@ -165,7 +173,7 @@ export async function investigateIssue(options: {
     const strongest = candidates[0];
     const hasStrongCandidate = strongest && strongest.confidence !== "low";
     const result = ForensicsResultSchema.parse({
-      status: strongest?.confidence === "high" ? "likely_regression" : strongest ? "possible_candidates" : "no_strong_evidence",
+      status: strongest?.confidence === "high" ? "likely_regression" : strongest?.confidence === "medium" ? "possible_candidates" : "no_strong_evidence",
       summary: hasStrongCandidate ? reasoning.summary : { text: `No strong regression candidate was found in the ${options.windowDays}-day window.`, sourceIds: [issueEvidence.id] },
       mostLikelyCandidateId: hasStrongCandidate ? strongest.id : null,
       timeline: buildTimeline(options.issue, issueCreatedAt, issueEvidence.id, seed, drafts.slice(0, 3), inspection.deployments), candidates,

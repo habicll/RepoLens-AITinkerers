@@ -85,6 +85,7 @@ test("packaged MV3 extension keeps CopilotKit results scoped to the current repo
     await panel.getByRole("button", { name: "Investigate issue" }).click();
     await expect(panel.getByRole("heading", { name: "Likely regression detected" })).toBeVisible();
     await expect(panel.getByRole("link", { name: "Open PR #461", exact: true })).toHaveAttribute("href", "https://github.com/test-owner/test-repo/pull/461");
+    await github.screenshot({ path: testInfo.outputPath("extension-forensics.png"), fullPage: false });
     await panel.getByRole("button", { name: "Back to overview" }).click();
     await panel.getByRole("button", { name: /Propose a solution/ }).click();
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toBeVisible();
@@ -127,6 +128,8 @@ test("packaged MV3 extension keeps CopilotKit results scoped to the current repo
     await panel.getByRole("button", { name: "Understand", exact: true }).click();
     await expect(panel.getByRole("heading", { name: "What this project is" })).toBeVisible();
     await expect(panel.getByText("RepoLens turns GitHub context into a concise, source-backed engineering briefing.")).toBeVisible();
+    await expect(panel.getByRole("heading", { name: "Paste this into your terminal" })).toBeVisible();
+    await expect(panel.locator(".run-commands pre")).toContainText("npm run dev");
     await expect(panel.getByRole("heading", { name: "Launch this project on this computer" })).toBeVisible();
     await github.screenshot({ path: testInfo.outputPath("extension-repository.png"), fullPage: false });
 

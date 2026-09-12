@@ -46,7 +46,7 @@ export function fixtureForensics(state: RepoLensState): RepoLensState {
   const candidateId = "candidate:pr-461";
   const candidateFacts = [
     { text: "PR #461 was merged 70 minutes before the issue was created.", sourceIds: ["pull_request:461", `commit:${sha}`] },
-    { text: "PR #461 changed src/auth/session.ts and src/auth/middleware.ts.", sourceIds: [`commit:${sha}`, "pull_request:461"] },
+    { text: "Associated commit 8fd22ab changed src/auth/session.ts and src/auth/middleware.ts.", sourceIds: [`commit:${sha}`, "pull_request:461"] },
     { text: "Authentication concluded failure on commit 8fd22ab.", sourceIds: ["workflow:824", `commit:${sha}`] },
     { text: "Deployment 93 targeted production with commit 8fd22ab and reported success.", sourceIds: ["deployment:93", `commit:${sha}`] },
   ];
@@ -96,7 +96,10 @@ export function fixtureRepositoryState(repository: RepositoryRef, runId = "fixtu
     importantSections: [{ title: "Architecture", explanation: "Explains how GitHub context moves through the application.", sourceIds: ["readme:root"] }],
     unknowns: ["The fixture does not execute the documented commands."],
   };
-  state.launchProposal = { status: "disabled", runtime: "Node.js + npm", commands: ["npm ci", "npm run dev"], reason: "Local execution is disabled on this RepoLens server.", requiresApproval: true };
+  state.launchProposal = { status: "disabled", runtime: "Node.js + npm", commands: [
+    `git clone --filter=blob:none --no-checkout ${repository.url}.git ${repository.repo}`, `cd ${repository.repo}`,
+    `git fetch --depth 1 origin ${sha}`, "git checkout --detach FETCH_HEAD", "npm ci", "npm run dev",
+  ], reason: "Local execution is disabled on this RepoLens server.", requiresApproval: true };
   state.status = "complete";
   state.phase = "Repository briefing ready";
   state.activities = [{ id: "readme", label: "Read README and package.json", status: "done" }];

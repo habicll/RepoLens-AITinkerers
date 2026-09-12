@@ -21,7 +21,7 @@ function CandidateCard({ candidate, primary = false }: { candidate: RegressionCa
     <div className="candidate-top"><span className="candidate-icon"><Icon size={18} /></span><div><span className="tiny-label">{candidate.type === "pull_request" ? `PULL REQUEST #${candidate.number}` : `COMMIT ${candidate.sha.slice(0, 7)}`}</span><h3>{candidate.title}</h3></div><span className={`confidence-badge ${candidate.confidence}`}>{candidate.confidence}</span></div>
     {candidate.inference && <div className="candidate-inference"><ShieldQuestion size={15} /><div><span>Inference</span><p>{candidate.inference.text}</p><SourceChips ids={candidate.inference.sourceIds} /></div></div>}
     <div className="candidate-signals">{candidate.signals.map(signal => <span key={signal}>{signal}</span>)}</div>
-    {candidate.changedFiles.length > 0 && <div className="candidate-files"><span className="small-label">CHANGED FILES</span>{candidate.changedFiles.slice(0, 6).map(path => <code key={path}>{path}</code>)}</div>}
+    {candidate.changedFiles.length > 0 && <div className="candidate-files"><span className="small-label">FILES ON ASSOCIATED COMMIT</span>{candidate.changedFiles.slice(0, 6).map(path => <code key={path}>{path}</code>)}</div>}
     <div className="candidate-actions">{url && <a href={url} target="_blank" rel="noreferrer noopener">Open {candidate.type === "pull_request" ? `PR #${candidate.number}` : "commit"}<ArrowUpRight size={13} /></a>}{filesUrl && candidate.changedFiles.length > 0 && <a href={filesUrl} target="_blank" rel="noreferrer noopener">View changed files<FileCode2 size={13} /></a>}</div>
   </article>;
 }

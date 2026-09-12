@@ -181,7 +181,7 @@ function AgentSession({ issue, requestToken, threadId, onBusy }: { issue: IssueR
     void run("understand");
   }, [requestToken, isReady, working, run]);
 
-  const stop = () => { activeRun.current = null; copilotkit.stopAgent({ agent }); setWorking(null); setStopped(true); };
+  const stop = () => { const wasForensics = working === "investigate_issue"; activeRun.current = null; copilotkit.stopAgent({ agent }); setWorking(null); setStopped(true); if (wasForensics) setView("overview"); };
   const openForensics = () => {
     setView("forensics");
     setLocalError(null);
@@ -277,7 +277,7 @@ function RepositoryAgentSession({ repository, requestToken, threadId, onBusy }: 
     {(working || waiting) && <section className="progress-card" role="status" aria-live="polite"><div className="progress-top"><span className="progress-icon"><BookOpen size={18} /></span><div><h2>{waiting ? "Connecting to your agent" : "Understanding this repository"}</h2><p>{current.phase || "Reading the README and project manifest…"}</p></div>{working && <button className="quiet-button" onClick={stop}><Square size={11} fill="currentColor" /> Stop</button>}</div>{current.activities.length > 0 && <ul className="activity-list">{current.activities.map(activity => <li key={activity.id} className={activity.status}>{activity.status === "running" ? <LoaderCircle size={13} className="spin" /> : activity.status === "done" ? <Check size={13} /> : <AlertCircle size={13} />}<span>{activity.label}</span></li>)}</ul>}<div className="progress-track"><span /></div></section>}
     {(localError || failed) && <Notice title={current.status === "permission_denied" ? "This repository is not accessible" : "The repository briefing could not be completed"} description={current.error?.message || localError || "Please try again."} />}
     {displayed?.repositoryAnalysis && <>
-      <RepositoryView analysis={displayed.repositoryAnalysis} sources={displayed.sources} metadata={displayed.repositoryMetadata} repository={repository} snapshot={displayed.snapshot} />
+      <RepositoryView analysis={displayed.repositoryAnalysis} sources={displayed.sources} metadata={displayed.repositoryMetadata} repository={repository} snapshot={displayed.snapshot} commands={displayed.launchProposal?.commands ?? []} />
       {displayed.launchProposal && displayed.repositoryAnalysisId && <LocalLaunchControl proposal={displayed.launchProposal} analysisId={displayed.repositoryAnalysisId} threadId={threadId} apiUrl={API_URL} />}
       <CoverageFooter coverage={displayed.coverage} snapshot={displayed.snapshot} />
     </>}

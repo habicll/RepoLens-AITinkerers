@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, BookOpen, Check, CircleHelp, FileCode2, LoaderCircle, Play, Square, Terminal } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BookOpen, Check, CircleHelp, Copy, FileCode2, LoaderCircle, Play, Square, Terminal } from "lucide-react";
 import type { Claim, LocalLaunchProposal, LocalLaunchStatus, RepositoryAnalysis, RepositoryMetadata, RepositoryRef, Snapshot, Source } from "../../shared/contracts";
 import { EvidenceScope, SourceChips } from "./AnalysisView";
 
@@ -7,9 +7,35 @@ function ClaimBlock({ claim }: { claim: Claim }) {
   return <div className="claim"><p>{claim.text}</p><SourceChips ids={claim.sourceIds} /></div>;
 }
 
-export function RepositoryView({ analysis, sources, metadata, repository, snapshot }: {
-  analysis: RepositoryAnalysis; sources: Source[]; metadata: RepositoryMetadata | null; repository: RepositoryRef; snapshot: Snapshot | null;
+async function copyText(value: string): Promise<void> {
+  try { await navigator.clipboard.writeText(value); return; }
+  catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    if (!copied) throw new Error("Clipboard unavailable");
+  }
+}
+
+export function RepositoryView({ analysis, sources, metadata, repository, snapshot, commands }: {
+  analysis: RepositoryAnalysis; sources: Source[]; metadata: RepositoryMetadata | null; repository: RepositoryRef; snapshot: Snapshot | null; commands: string[];
 }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetCopy = useRef<number | null>(null);
+  useEffect(() => () => { if (resetCopy.current) window.clearTimeout(resetCopy.current); }, []);
+  const copyCommands = async () => {
+    try { await copyText(commands.join("\n")); setCopyState("copied"); }
+    catch { setCopyState("failed"); }
+    if (resetCopy.current) window.clearTimeout(resetCopy.current);
+    resetCopy.current = window.setTimeout(() => setCopyState("idle"), 1600);
+  };
+  const commandSourceIds = sources.filter(source => source.kind === "readme" || source.path === "package.json").map(source => source.id);
   return <EvidenceScope sources={sources}><>
     <div className="briefing-heading repository-heading"><div><span className="eyebrow">REPOSITORY BRIEFING</span><h2>{metadata?.name || repository.repo}</h2><a className="issue-reference" href={repository.url} target="_blank" rel="noreferrer noopener"><BookOpen size={14} /><span>{repository.owner}/{repository.repo}</span><ArrowUpRight size={13} /></a></div>{metadata?.language && <span className="issue-state open">{metadata.language}</span>}</div>
     <section className="result-card repository-summary" aria-labelledby="repository-summary-heading">
@@ -17,12 +43,13 @@ export function RepositoryView({ analysis, sources, metadata, repository, snapsh
       <ClaimBlock claim={analysis.summary} />
       <div className="repository-purpose"><div><span className="small-label">WHAT IT DOES</span><ClaimBlock claim={analysis.whatItDoes} /></div><div><span className="small-label">WHO IT IS FOR</span><ClaimBlock claim={analysis.audience} /></div></div>
     </section>
+    {commands.length > 0 && <section className="run-commands" aria-labelledby="run-commands-heading"><div className="run-commands-heading"><div><span className="eyebrow">COPY &amp; RUN</span><h2 id="run-commands-heading">Paste this into your terminal</h2></div><button type="button" onClick={() => void copyCommands()}><Copy size={13} />{copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}</button></div><pre><code>{commands.join("\n")}</code></pre>{commandSourceIds.length > 0 && <div className="run-commands-sources"><span>Derived from the pinned manifest and README</span><SourceChips ids={commandSourceIds} /></div>}</section>}
     <div className="repository-grid">
       <section className="result-card"><div className="section-heading"><span className="section-marker">02</span><h2>Concepts to know</h2></div>{analysis.keyConcepts.length ? <div className="repository-list">{analysis.keyConcepts.map((claim, index) => <article key={index}><span>{index + 1}</span><ClaimBlock claim={claim} /></article>)}</div> : <p className="muted-copy">The inspected README does not establish distinct project concepts.</p>}</section>
       <section className="result-card"><div className="section-heading"><span className="section-marker">03</span><h2>How it is organized</h2></div>{analysis.architecture.length ? <div className="repository-list">{analysis.architecture.map((claim, index) => <article key={index}><FileCode2 size={15} /><ClaimBlock claim={claim} /></article>)}</div> : <p className="muted-copy">No architecture was explicitly documented in the inspected sources.</p>}</section>
     </div>
     <section className="details-card repository-details">
-      <details className="detail" open><summary><span className="detail-icon"><Terminal size={17} /></span><span>Quick start from the README</span><span className="detail-badge">Not executed</span></summary><div className="detail-body">{analysis.quickStart.length ? <ol className="claim-list numbered">{analysis.quickStart.map((claim, index) => <li key={index}><ClaimBlock claim={claim} /></li>)}</ol> : <p className="muted-copy">No verified setup instructions were found in the README or manifest.</p>}</div></details>
+      <details className="detail"><summary><span className="detail-icon"><Terminal size={17} /></span><span>Setup details from the README</span><span className="detail-badge">Not executed</span></summary><div className="detail-body">{analysis.quickStart.length ? <ol className="claim-list numbered">{analysis.quickStart.map((claim, index) => <li key={index}><ClaimBlock claim={claim} /></li>)}</ol> : <p className="muted-copy">No verified setup instructions were found in the README or manifest.</p>}</div></details>
       <details className="detail"><summary><span className="detail-icon"><BookOpen size={17} /></span><span>README sections worth reading</span><span className="detail-badge">{analysis.importantSections.length}</span></summary><div className="detail-body"><div className="repository-sections">{analysis.importantSections.map((section, index) => <article key={index}><h3>{section.title}</h3><p>{section.explanation}</p><SourceChips ids={section.sourceIds} /></article>)}</div></div></details>
       <details className="detail"><summary><span className="detail-icon"><CircleHelp size={17} /></span><span>What is still unknown</span><span className="detail-badge">{analysis.unknowns.length}</span></summary><div className="detail-body">{analysis.unknowns.length ? <ul className="plain-list">{analysis.unknowns.map((unknown, index) => <li key={index}>{unknown}</li>)}</ul> : <p className="muted-copy">No additional gaps were identified in the inspected project overview.</p>}</div></details>
     </section>
@@ -76,7 +103,6 @@ export function LocalLaunchControl({ proposal, analysisId, threadId, apiUrl }: {
   return <section className="local-launch" aria-labelledby="local-launch-heading">
     <div className="local-launch-heading"><span className="terminal-icon"><Terminal size={19} /></span><div><span className="eyebrow">OPTIONAL LOCAL RUN</span><h2 id="local-launch-heading">Launch this project on this computer</h2></div>{run && <span className={`run-status ${run.status}`}>{run.status}</span>}</div>
     <p>{proposal.reason}</p>
-    {proposal.commands.length > 0 && <div className="command-preview">{proposal.commands.map(command => <code key={command}>{command}</code>)}</div>}
     {proposal.status === "available" && !reviewing && !run && <button className="primary-button" type="button" onClick={() => setReviewing(true)}><Play size={15} />Review and launch</button>}
     {proposal.status === "disabled" && <p className="inline-note"><AlertTriangle size={15} /> The server owner must enable local execution before this button becomes available.</p>}
     {proposal.status === "unsupported" && <p className="inline-note"><AlertTriangle size={15} /> RepoLens will not guess a command or execute README text.</p>}
