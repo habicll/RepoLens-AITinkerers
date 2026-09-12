@@ -10,6 +10,7 @@ await rm("dist-extension", { recursive: true, force: true });
 await mkdir("dist-extension", { recursive: true });
 await cp("dist", "dist-extension", { recursive: true });
 await cp("extension/background.js", "dist-extension/background.js");
+await cp("extension/content.js", "dist-extension/content.js");
 const manifest = JSON.parse(await readFile("extension/manifest.json", "utf8"));
 manifest.host_permissions = ["https://github.com/*", `${backend.protocol}//${backend.hostname}/*`];
 manifest.content_security_policy.extension_pages = `script-src 'self'; object-src 'none'; connect-src 'self' ${backend.origin}`;

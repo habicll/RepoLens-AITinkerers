@@ -4,11 +4,18 @@
   "version": "0.1.0",
   "description": "Understand a GitHub issue, its discussion and the relevant code.",
   "minimum_chrome_version": "116",
-  "permissions": ["sidePanel"],
   "host_permissions": ["https://github.com/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Open RepoLens" },
-  "side_panel": { "default_path": "index.html" },
+  "content_scripts": [{
+    "matches": ["https://github.com/*/issues/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{
+    "resources": ["index.html", "assets/*"],
+    "matches": ["https://github.com/*"]
+  }],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:3001"
   }

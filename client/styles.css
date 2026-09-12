@@ -2208,6 +2208,202 @@ svg {
   }
 }
 
+/* Compact surface rendered inside the extension's floating GitHub overlay. */
+html.overlay-document,
+html.overlay-document body {
+  color-scheme:dark;
+  background:#0b0c11;
+}
+.is-overlay {
+  --ink:#f3f2f8;
+  --muted:#a1a3af;
+  --line:rgba(255,255,255,.09);
+  --indigo:#8b7cff;
+  --soft:rgba(139,124,255,.13);
+  --green:#74b797;
+  max-width:none;
+  min-height:100%;
+  padding:0 14px 18px;
+  color:#d4d5dc;
+  background:linear-gradient(180deg,rgba(16,17,23,.98),rgba(10,11,15,.98));
+}
+.is-overlay .site-header {
+  height:54px;
+  position:sticky;
+  top:0;
+  z-index:5;
+  border-color:rgba(255,255,255,.08);
+  background:rgba(16,17,23,.9);
+  backdrop-filter:blur(14px);
+}
+.is-overlay .brand {
+  font-size:16px;
+  letter-spacing:-.35px;
+}
+.is-overlay .brand-mark {
+  width:29px;
+  height:29px;
+  border-radius:9px;
+  background:linear-gradient(145deg,#8071ff,#4d42d4);
+  box-shadow:0 8px 22px rgba(82,68,216,.28);
+}
+.is-overlay .brand-mark svg {
+  width:18px;
+}
+.is-overlay .read-only {
+  font-size:10px;
+  color:#858893;
+}
+.is-overlay .main {
+  max-width:none;
+}
+.is-overlay .hero,
+.is-overlay .site-footer {
+  display:none;
+}
+.is-overlay .issue-picker {
+  margin-top:12px;
+  padding:12px;
+  border-color:rgba(255,255,255,.09);
+  border-radius:13px;
+  background:rgba(255,255,255,.035);
+  box-shadow:none;
+}
+.is-overlay .picker-heading {
+  margin-bottom:9px;
+  color:#8f91a0;
+}
+.is-overlay .picker-heading .small-label {
+  color:#8f91a0;
+  font-size:9px;
+}
+.is-overlay .detected-issue {
+  min-height:40px;
+  color:#e9e8ef;
+  border-color:rgba(255,255,255,.1);
+  background:rgba(255,255,255,.045);
+}
+.is-overlay .detected-issue .muted-copy,
+.is-overlay .picker-note,
+.is-overlay .connection-note {
+  color:#92949f;
+}
+.is-overlay .primary-button {
+  background:linear-gradient(135deg,#7565f2,#5d51dc);
+  box-shadow:0 8px 24px rgba(76,61,199,.2);
+}
+.is-overlay .primary-button:hover:not(:disabled) {
+  background:linear-gradient(135deg,#8273ff,#685ce8);
+}
+.is-overlay .briefing-heading {
+  margin-top:20px;
+}
+.is-overlay .briefing-heading h2,
+.is-overlay .section-heading h2,
+.is-overlay .attempt h3,
+.is-overlay .file-item h3,
+.is-overlay .hypothesis h3,
+.is-overlay .details-header h2,
+.is-overlay .next-step h2,
+.is-overlay .solution-heading h2,
+.is-overlay .plan-step h4,
+.is-overlay .notice h2,
+.is-overlay .progress-top h2,
+.is-overlay .ready-card h2 {
+  color:#f1f0f6;
+}
+.is-overlay .issue-reference,
+.is-overlay .eyebrow,
+.is-overlay .small-label,
+.is-overlay .details-header>span,
+.is-overlay .coverage,
+.is-overlay .coverage-limits summary {
+  color:#898c99;
+}
+.is-overlay .issue-labels>span,
+.is-overlay .issue-state,
+.is-overlay .detail-badge {
+  color:#acaeb8;
+  border-color:rgba(255,255,255,.1);
+  background:rgba(255,255,255,.045);
+}
+.is-overlay .result-card,
+.is-overlay .details-card,
+.is-overlay .solution-card,
+.is-overlay .progress-card,
+.is-overlay .notice,
+.is-overlay .ready-card {
+  border-color:rgba(255,255,255,.09);
+  background:rgba(255,255,255,.035);
+  box-shadow:0 14px 40px rgba(0,0,0,.12);
+}
+.is-overlay .analysis-grid,
+.is-overlay .hypotheses {
+  gap:10px;
+}
+.is-overlay .hypothesis {
+  border-color:rgba(220,183,105,.2);
+  background:rgba(176,130,47,.07);
+}
+.is-overlay .claim p,
+.is-overlay .summary-claim p,
+.is-overlay .fact .claim p,
+.is-overlay .attempt p,
+.is-overlay .file-item p,
+.is-overlay .detail-body .claim p,
+.is-overlay .plain-list,
+.is-overlay .muted-copy,
+.is-overlay .solution-approach p,
+.is-overlay .plan-step p,
+.is-overlay .ready-card p,
+.is-overlay .notice p,
+.is-overlay .progress-top p {
+  color:#b6b8c2;
+}
+.is-overlay .hypothesis>p,
+.is-overlay .hypothesis-unknown {
+  color:#c1ad85;
+}
+.is-overlay .source-chip,
+.is-overlay .plan-files code {
+  color:#b9b1f0;
+  border-color:rgba(139,124,255,.18);
+  background:rgba(139,124,255,.08);
+}
+.is-overlay .facts,
+.is-overlay .attempt,
+.is-overlay .file-item,
+.is-overlay .details-header,
+.is-overlay .detail,
+.is-overlay .solution-notes,
+.is-overlay .plan,
+.is-overlay .coverage {
+  border-color:rgba(255,255,255,.08);
+}
+.is-overlay .source-dialog {
+  color:#d6d7de;
+  border-color:rgba(255,255,255,.12);
+  background:#15161c;
+  box-shadow:0 25px 80px rgba(0,0,0,.55);
+}
+.is-overlay .source-dialog::backdrop {
+  background:rgba(2,3,5,.74);
+  backdrop-filter:blur(4px);
+}
+.is-overlay .source-excerpt {
+  color:#d3d1dc;
+  border-color:rgba(255,255,255,.08);
+  background:#0b0c10;
+}
+.is-overlay .next-step {
+  border-color:rgba(255,255,255,.08);
+}
+.is-overlay button:focus-visible,
+.is-overlay a:focus-visible,
+.is-overlay summary:focus-visible {
+  outline-color:#9184ff;
+}
+
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after {
     animation:none!important;

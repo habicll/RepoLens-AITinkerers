@@ -1,4 +1,5 @@
-// The panel owns the network stream; this worker only tracks the current page.
+// The floating extension view owns the network stream; this worker only tracks
+// the active page and forwards toolbar clicks to the injected launcher.
 const isIssue = (value) => {
   try {
     const url = new URL(value);
@@ -17,7 +18,11 @@ async function announce(windowId) {
   await chrome.runtime.sendMessage({ type: "ISSUE_CONTEXT_CHANGED", ...context, windowId }).catch(() => {});
 }
 
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.id && tab.url && isIssue(tab.url)) {
+    chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_REPOLENS" }).catch(() => {});
+  }
+});
 
 chrome.tabs.onUpdated.addListener(async (tabId, change, tab) => {
   if (!change.url && change.status !== "complete") return;

@@ -8,6 +8,7 @@ export const API_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:3001")
 type Intent = "understand" | "propose_solution";
 type HealthState = { kind: "checking" } | { kind: "ready"; data: HealthInfo } | { kind: "offline" };
 const isExtension = typeof chrome !== "undefined" && !!chrome.runtime?.id;
+const isOverlay = isExtension && new URLSearchParams(window.location.search).get("surface") === "overlay";
 
 function initialIssue(): IssueRef | null {
   return parseIssueUrl(new URLSearchParams(window.location.search).get("issue") || "");
@@ -74,7 +75,7 @@ export default function App() {
   const disabled = busy || !configured || (isExtension && !issue);
   const resetConnection = useCallback(() => { setConnectionVersion((value) => value + 1); setBusy(false); }, []);
 
-  return <div className={`app ${isExtension ? "is-extension" : ""} ${issue ? "has-issue" : ""}`}>
+  return <div className={`app ${isExtension ? "is-extension" : ""} ${isOverlay ? "is-overlay" : ""} ${issue ? "has-issue" : ""}`}>
     <header className="site-header"><a className="brand" href={isExtension ? undefined : "/"} aria-label="RepoLens home"><span className="brand-mark"><Focus size={23} strokeWidth={1.8} /></span><span>RepoLens</span></a><span className="read-only"><ShieldCheck size={14} /> Read-only by design</span></header>
     <main className="main">
       <section className="hero"><div className="eyebrow"><span className="eyebrow-line" /> GITHUB ISSUE COMPANION</div><h1>Understand before<br className="desktop-break" /> you build<span className="accent-dot">.</span></h1><p>The discussion, the relevant code, the missing pieces.<br className="desktop-break" /> One clear starting point for your next issue.</p></section>

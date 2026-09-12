@@ -1,4 +1,4 @@
-import { chromium, expect, test, type Page } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -56,21 +56,15 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.name).toBe("RepoLens");
     expect(manifest.content_security_policy).toMatchObject({ extension_pages: expect.stringContaining("script-src 'self'") });
-    await expect.poll(() => worker.evaluate(async () => (await chrome.sidePanel.getPanelBehavior()).openPanelOnActionClick)).toBe(true);
-    expect(await worker.evaluate(async () => (await chrome.sidePanel.getOptions({})).path)).toBe("index.html");
-
     const github = context.pages()[0] ?? await context.newPage();
     await github.goto(firstIssue);
     await github.bringToFront();
-    const panelCreated = context.waitForEvent("page");
-    // Playwright cannot operate the browser toolbar. Load the real panel bundle
-    // in an inactive extension tab so GitHub remains the actual active tab.
-    // This verifies the packaged panel and worker, not Chrome's toolbar gesture.
-    await worker.evaluate(async url => { await chrome.tabs.create({ url, active: false }); }, `chrome-extension://${extensionId}/index.html`);
-    const panel: Page = await panelCreated;
-    await panel.waitForLoadState("domcontentloaded");
-    await panel.setViewportSize({ width: 430, height: 900 });
-    expect(panel.url()).toBe(`chrome-extension://${extensionId}/index.html`);
+    const launcher = github.getByRole("button", { name: "Open RepoLens", exact: true });
+    await expect(launcher).toBeVisible();
+    await launcher.click();
+    const panel = github.frameLocator('iframe[title="RepoLens issue assistant"]');
+    await expect(panel.locator("body")).toBeVisible();
+    expect(await panel.locator("html").evaluate(() => location.href)).toBe(`chrome-extension://${extensionId}/index.html?surface=overlay`);
     await expect(panel.getByText("CONNECTED TO YOUR TAB", { exact: true })).toBeVisible();
     await expect(panel.locator(".detected-issue")).toContainText("test-owner/test-repo");
     await expect(panel.locator(".detected-issue")).toContainText("Issue #184");
@@ -89,9 +83,10 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     await panel.getByRole("button", { name: "Close source" }).click();
     await panel.getByRole("button", { name: /Propose a solution/ }).click();
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toBeVisible();
-    await panel.screenshot({ path: testInfo.outputPath("extension-solution.png"), fullPage: true });
+    await github.screenshot({ path: testInfo.outputPath("extension-solution.png"), fullPage: false });
 
     await github.goto(slowIssue);
+    await github.getByRole("button", { name: "Open RepoLens", exact: true }).click();
     await expect(panel.locator(".detected-issue")).toContainText("Issue #999");
     await expect(panel.getByRole("heading", { name: "The problem", exact: true })).toHaveCount(0);
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toHaveCount(0);
@@ -108,10 +103,10 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     await expect(panel.getByRole("heading", { name: "The problem", exact: true })).toBeVisible();
     await expect(panel.locator(".issue-reference")).toContainText("#185");
     // The fixture's previous run completes after 4 s unless cleanup cancels it.
-    await panel.waitForTimeout(4_100);
+    await github.waitForTimeout(4_100);
     await expect(panel.locator(".issue-reference")).toContainText("#185");
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toHaveCount(0);
-    await panel.screenshot({ path: testInfo.outputPath("extension-briefing.png"), fullPage: true });
+    await github.screenshot({ path: testInfo.outputPath("extension-briefing.png"), fullPage: false });
 
     expect(runs.map(run => [run.forwardedProps.intent, run.forwardedProps.issue.url])).toEqual([
       ["understand", firstIssue], ["propose_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue],
@@ -123,7 +118,7 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     }
     expect(runs[0].threadId).not.toBe(runs[3].threadId);
     expect(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.url)).toBe(nextIssue);
-    expect(await panel.evaluate(() => (window as Window & { __extensionCspViolations?: string[] }).__extensionCspViolations ?? [])).toEqual([]);
+    expect(await panel.locator("html").evaluate(() => (window as Window & { __extensionCspViolations?: string[] }).__extensionCspViolations ?? [])).toEqual([]);
     expect(cspErrors).toEqual([]);
     expect(runtimeErrors).toEqual([]);
     expect(unexpectedRequests).toEqual([]);
