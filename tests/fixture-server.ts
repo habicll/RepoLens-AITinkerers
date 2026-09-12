@@ -3,15 +3,27 @@ import { AbstractAgent } from "@ag-ui/client";
 import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import { Observable } from "rxjs";
 import { createApp } from "../server/index.js";
-import { parseIssueUrl } from "../shared/contracts.js";
-import { fixtureState } from "./fixture-data.js";
+import { parseIssueUrl, parseRepositoryUrl } from "../shared/contracts.js";
+import { fixtureRepositoryState, fixtureState } from "./fixture-data.js";
 
 class FixtureAgent extends AbstractAgent {
   constructor() { super({ agentId: "repolens", description: "Automated test fixture" }); }
   override clone(): FixtureAgent { return new FixtureAgent(); }
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable((observer) => {
-      const props = input.forwardedProps as { issue?: { url?: string }; intent?: string };
+      const props = input.forwardedProps as { issue?: { url?: string }; repository?: { url?: string }; intent?: string };
+      const repository = parseRepositoryUrl(props?.repository?.url || "");
+      if (props.intent === "understand_repository" && repository) {
+        observer.next({ type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId });
+        const state = fixtureRepositoryState(repository, input.runId);
+        observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: { ...state, repositoryAnalysis: null, repositoryAnalysisId: null, status: "loading", phase: "Reading the README and project manifest" } });
+        const repositoryTimer = setTimeout(() => {
+          observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: state });
+          observer.next({ type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId });
+          observer.complete();
+        }, 200);
+        return () => clearTimeout(repositoryTimer);
+      }
       const issue = parseIssueUrl(props?.issue?.url || "");
       if (!issue) { observer.error(new Error("Missing test issue")); return; }
       observer.next({ type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId });

@@ -38,6 +38,12 @@ function object(value: unknown): JsonObject {
 }
 function text(value: unknown, max = 500): string { return typeof value === "string" ? value.slice(0, max) : ""; }
 function integer(value: unknown): number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0; }
+function safePath(value: unknown, fallback: string): string {
+  const path = text(value, 500) || fallback;
+  if (!path || /[\\\u0000-\u001f\u007f]/.test(path) || path.split("/").some(segment => !segment || segment === "." || segment === "..")) return fallback;
+  return path;
+}
+function encodedPath(path: string): string { return path.split("/").map(encodeURIComponent).join("/"); }
 function gitSha(value: unknown): string {
   if (typeof value !== "string" || !/^[a-f0-9]{40,64}$/i.test(value)) throw new AppError("GITHUB_INVALID_RESPONSE", "GitHub returned an invalid commit identifier.", 502, true);
   return value;
@@ -159,9 +165,9 @@ export class GitHubProject implements ProjectReader {
 
     if (readmeResult.status === 200) {
       const value = object(readmeResult.data);
-      const path = text(value.path, 500) || "README.md";
+      const path = safePath(value.path, "README.md");
       const readme = numbered(decodeContent(value, README_LIMIT));
-      this.sources.push({ id: "readme:root", kind: "readme", label: `${path}:1–${readme.lineEnd}`, url: `https://github.com/${this.fullName}/blob/${commitSha}/${path}`, path, lineStart: 1, lineEnd: readme.lineEnd, excerpt: readme.excerpt });
+      this.sources.push({ id: "readme:root", kind: "readme", label: `${path}:1–${readme.lineEnd}`, url: `https://github.com/${this.fullName}/blob/${commitSha}/${encodedPath(path)}`, path, lineStart: 1, lineEnd: readme.lineEnd, excerpt: readme.excerpt });
       this.coverage.filesRead += 1;
       if (readme.excerpt.length >= README_LIMIT) this.coverage.limits.push("The README was shortened to the first 32,000 characters.");
     } else this.coverage.limits.push("No README was found on the default branch.");

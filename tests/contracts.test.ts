@@ -29,5 +29,6 @@ describe("GitHub repository identity", () => {
   it.each([
     "http://github.com/owner/repo", "https://github.com.evil.test/owner/repo", "https://github.com/owner/repo.git",
     "https://github.com/owner/repo/tree/main", "https://github.com/owner/repo/issues", "https://github.com/owner",
+    "https://github.com/settings/profile", "https://github.com/marketplace/actions",
   ])("rejects unsupported repository URL %s", url => expect(parseRepositoryUrl(url)).toBeNull());
 });

@@ -34,7 +34,8 @@ export function parseRepositoryUrl(value: string): RepositoryRef | null {
     const url = new URL(value.trim());
     if (url.protocol !== "https:" || url.hostname !== "github.com" || url.port || url.username || url.password) return null;
     const match = /^\/([^/]+)\/([^/]+)\/?$/.exec(url.pathname);
-    if (!match || match[2].endsWith(".git")) return null;
+    const reserved = new Set(["about", "collections", "customer-stories", "enterprise", "events", "features", "login", "marketplace", "new", "notifications", "organizations", "orgs", "pricing", "readme", "search", "security", "settings", "signup", "sponsors", "topics"]);
+    if (!match || match[2].endsWith(".git") || reserved.has(match[1].toLowerCase())) return null;
     const result = RepositoryRefSchema.safeParse({ owner: match[1], repo: match[2], url: `https://github.com/${match[1]}/${match[2]}` });
     return result.success ? result.data : null;
   } catch { return null; }

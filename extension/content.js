@@ -1,10 +1,12 @@
 (() => {
   if (window.top !== window || document.getElementById("repolens-extension-root")) return;
 
-  const isIssue = (value) => {
+  const isSupported = (value) => {
     try {
       const url = new URL(value);
-      return url.protocol === "https:" && url.hostname === "github.com" && /^\/[^/]+\/[^/]+\/issues\/[1-9]\d*\/?$/.test(url.pathname);
+      const repository = /^\/([^/]+)\/[^/]+\/?$/.exec(url.pathname);
+      const reserved = new Set(["about", "collections", "customer-stories", "enterprise", "events", "features", "login", "marketplace", "new", "notifications", "organizations", "orgs", "pricing", "readme", "search", "security", "settings", "signup", "sponsors", "topics"]);
+      return url.protocol === "https:" && url.hostname === "github.com" && ((repository && !reserved.has(repository[1].toLowerCase())) || /^\/[^/]+\/[^/]+\/issues\/[1-9]\d*\/?$/.test(url.pathname));
     } catch { return false; }
   };
 
@@ -39,9 +41,9 @@
   const panel = document.createElement("section");
   panel.className = "panel";
   panel.setAttribute("aria-hidden", "true");
-  panel.innerHTML = `<div class="panel-bar"><span class="panel-title"><span class="status"></span>RepoLens · Issue context</span><button class="close" type="button" aria-label="Close RepoLens"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>`;
+  panel.innerHTML = `<div class="panel-bar"><span class="panel-title"><span class="status"></span>RepoLens · GitHub context</span><button class="close" type="button" aria-label="Close RepoLens"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>`;
   const frame = document.createElement("iframe");
-  frame.title = "RepoLens issue assistant";
+  frame.title = "RepoLens GitHub context assistant";
   frame.src = chrome.runtime.getURL("index.html?surface=overlay");
   frame.allow = "clipboard-write";
   panel.append(frame);
@@ -67,7 +69,7 @@
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") setOpen(false); });
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === "TOGGLE_REPOLENS") toggle();
-    if (message?.type === "ISSUE_CONTEXT_CHANGED") host.hidden = !isIssue(location.href);
+    if (message?.type === "GITHUB_CONTEXT_CHANGED" || message?.type === "ISSUE_CONTEXT_CHANGED") host.hidden = !isSupported(location.href);
   });
-  host.hidden = !isIssue(location.href);
+  host.hidden = !isSupported(location.href);
 })();

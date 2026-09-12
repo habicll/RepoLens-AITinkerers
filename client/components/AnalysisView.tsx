@@ -28,7 +28,7 @@ function SourcePreview({ source, onClose }: { source: Source; onClose: () => voi
       <div><span className="eyebrow">SOURCE EXCERPT</span><h2 id="source-title">{source.label}</h2></div>
       <button className="icon-button" onClick={onClose} aria-label="Close source"><X size={19} /></button>
     </div>
-    <div className="source-meta">{source.kind === "file" || source.kind === "readme" ? <FileCode2 size={14} /> : <MessageSquare size={14} />}
+    <div className="source-meta">{source.kind === "file" || source.kind === "readme" || source.kind === "repository" ? <FileCode2 size={14} /> : <MessageSquare size={14} />}
       <span>{source.path || (source.author ? `@${source.author}` : source.kind)}{source.lineStart ? ` · lines ${source.lineStart}–${source.lineEnd || source.lineStart}` : ""}</span>
     </div>
     <pre className="source-excerpt">{source.excerpt || "No excerpt is available for this source."}</pre>
@@ -42,7 +42,7 @@ export function SourceChips({ ids }: { ids: string[] }) {
   return <span className="source-chips">{[...new Set(ids)].map((id) => {
     const source = byId.get(id);
     if (!source) return null;
-    const label = source.path?.split("/").pop() || (source.kind === "comment" ? (source.author ? `@${source.author}` : "Comment") : source.kind === "issue" ? "Issue" : "README");
+    const label = source.path?.split("/").pop() || (source.kind === "comment" ? (source.author ? `@${source.author}` : "Comment") : source.kind === "issue" ? "Issue" : source.kind === "repository" ? "Repository" : "README");
     return <button key={id} type="button" className="source-chip" onClick={() => select(source)} title={`Read source: ${source.label}`} aria-label={`Read source: ${source.label}`}><Link2 size={11} /><span>{label}</span></button>;
   })}</span>;
 }

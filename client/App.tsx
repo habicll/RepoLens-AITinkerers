@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { CopilotKitProvider, useAgent, useAgentContext, useCopilotKit } from "@copilotkit/react-core/v2";
-import { AlertCircle, ArrowRight, ArrowUpRight, Check, CircleDot, FileCode2, Focus, Github, GitBranch, Link2, LoaderCircle, MessageSquare, RefreshCw, Search, ShieldCheck, Sparkles, Square } from "lucide-react";
-import { initialState, issueKey, parseIssueUrl, type HealthInfo, type IssueRef, type RepoLensState } from "../shared/contracts";
+import { AlertCircle, ArrowRight, ArrowUpRight, BookOpen, Check, CircleDot, FileCode2, Focus, Github, GitBranch, Link2, LoaderCircle, MessageSquare, RefreshCw, Search, ShieldCheck, Sparkles, Square } from "lucide-react";
+import { initialRepositoryState, initialState, issueKey, parseIssueUrl, parseRepositoryUrl, repositoryKey, type HealthInfo, type IssueRef, type RepositoryRef, type RepoLensState } from "../shared/contracts";
 import { AnalysisView, CoverageFooter, ImplementationView, SolutionView } from "./components/AnalysisView";
+import { LocalLaunchControl, RepositoryView } from "./components/RepositoryView";
 
 export const API_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:3001").replace(/\/$/, "");
 type Intent = "understand" | "propose_solution" | "implement_solution";
@@ -13,10 +14,14 @@ const isOverlay = isExtension && new URLSearchParams(window.location.search).get
 function initialIssue(): IssueRef | null {
   return parseIssueUrl(new URLSearchParams(window.location.search).get("issue") || "");
 }
+function initialRepository(): RepositoryRef | null {
+  return parseRepositoryUrl(new URLSearchParams(window.location.search).get("repository") || "");
+}
 
 export default function App() {
   const [issue, setIssue] = useState<IssueRef | null>(initialIssue);
-  const [url, setUrl] = useState(() => initialIssue()?.url || "");
+  const [repository, setRepository] = useState<RepositoryRef | null>(initialRepository);
+  const [url, setUrl] = useState(() => initialIssue()?.url || initialRepository()?.url || "");
   const [inputError, setInputError] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthState>({ kind: "checking" });
   const [healthVersion, setHealthVersion] = useState(0);
@@ -47,19 +52,20 @@ export default function App() {
     const applyContext = (value: { url?: unknown }) => {
       if (!alive) return;
       const next = typeof value.url === "string" ? parseIssueUrl(value.url) : null;
-      const nextKey = next ? issueKey(next) : null;
+      const nextRepository = !next && typeof value.url === "string" ? parseRepositoryUrl(value.url) : null;
+      const nextKey = next ? `issue:${issueKey(next)}` : nextRepository ? `repository:${repositoryKey(nextRepository)}` : null;
       if (nextKey !== lastContextKey) {
         lastContextKey = nextKey;
-        setIssue(next); setRequest(null); setBusy(false); setInputError(null);
+        setIssue(next); setRepository(nextRepository); setRequest(null); setBusy(false); setInputError(null);
       }
-      setUrl(next?.url || "");
+      setUrl(next?.url || nextRepository?.url || "");
     };
     chrome.windows.getCurrent().then((window) => {
       panelWindowId = window.id;
-      return chrome.runtime.sendMessage({ type: "GET_ISSUE_CONTEXT", windowId: panelWindowId });
+      return chrome.runtime.sendMessage({ type: "GET_GITHUB_CONTEXT", windowId: panelWindowId });
     }).then((context) => { if (contextUpdates === 0) applyContext(context); }).catch(() => { if (alive) setInputError("The current GitHub page could not be detected. Reopen the panel to reconnect."); });
     const listener = (message: { type?: string; url?: unknown; windowId?: number }) => {
-      if (message.type === "ISSUE_CONTEXT_CHANGED" && panelWindowId !== undefined && message.windowId === panelWindowId) { contextUpdates += 1; applyContext(message); }
+      if ((message.type === "GITHUB_CONTEXT_CHANGED" || message.type === "ISSUE_CONTEXT_CHANGED") && panelWindowId !== undefined && message.windowId === panelWindowId) { contextUpdates += 1; applyContext(message); }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => { alive = false; chrome.runtime.onMessage.removeListener(listener); };
@@ -67,32 +73,37 @@ export default function App() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const next = isExtension ? issue : parseIssueUrl(url);
-    if (!next) { setInputError("Use a public GitHub issue URL, like https://github.com/owner/repo/issues/123."); return; }
-    setInputError(null); setIssue(next); setUrl(next.url); setRequest({ key: issueKey(next), token: crypto.randomUUID() });
+    const nextIssue = isExtension ? issue : parseIssueUrl(url);
+    const nextRepository = nextIssue ? null : isExtension ? repository : parseRepositoryUrl(url);
+    if (!nextIssue && !nextRepository) { setInputError("Use a public GitHub repository or issue URL."); return; }
+    setInputError(null); setIssue(nextIssue); setRepository(nextRepository);
+    const nextUrl = nextIssue?.url || nextRepository!.url;
+    const key = nextIssue ? `issue:${issueKey(nextIssue)}` : `repository:${repositoryKey(nextRepository!)}`;
+    setUrl(nextUrl); setRequest({ key, token: crypto.randomUUID() });
   };
   const configured = health.kind === "ready" && health.data.openaiConfigured;
-  const disabled = busy || !configured || (isExtension && !issue);
+  const disabled = busy || !configured || (isExtension && !issue && !repository);
   const resetConnection = useCallback(() => { setConnectionVersion((value) => value + 1); setBusy(false); }, []);
 
-  return <div className={`app ${isExtension ? "is-extension" : ""} ${isOverlay ? "is-overlay" : ""} ${issue ? "has-issue" : ""}`}>
-    <header className="site-header"><a className="brand" href={isExtension ? undefined : "/"} aria-label="RepoLens home"><span className="brand-mark"><Focus size={23} strokeWidth={1.8} /></span><span>RepoLens</span></a><span className="read-only"><ShieldCheck size={14} /> Read-only by design</span></header>
+  return <div className={`app ${isExtension ? "is-extension" : ""} ${isOverlay ? "is-overlay" : ""} ${issue || repository ? "has-issue" : ""}`}>
+    <header className="site-header"><a className="brand" href={isExtension ? undefined : "/"} aria-label="RepoLens home"><span className="brand-mark"><Focus size={23} strokeWidth={1.8} /></span><span>RepoLens</span></a><span className="read-only"><ShieldCheck size={14} /> Evidence before action</span></header>
     <main className="main">
-      <section className="hero"><div className="eyebrow"><span className="eyebrow-line" /> GITHUB ISSUE COMPANION</div><h1>Understand before<br className="desktop-break" /> you build<span className="accent-dot">.</span></h1><p>The discussion, the relevant code, the missing pieces.<br className="desktop-break" /> One clear starting point for your next issue.</p></section>
-      <section className="issue-picker" aria-label="Choose a GitHub issue">
-        <div className="picker-heading"><span className="small-label">{isExtension ? "CONNECTED TO YOUR TAB" : "START WITH A GITHUB ISSUE"}</span><Github size={16} /></div>
+      <section className="hero"><div className="eyebrow"><span className="eyebrow-line" /> GITHUB CONTEXT COMPANION</div><h1>Understand before<br className="desktop-break" /> you build<span className="accent-dot">.</span></h1><p>The README, the discussion, the relevant code.<br className="desktop-break" /> One clear starting point for a repository or issue.</p></section>
+      <section className="issue-picker" aria-label="Choose a GitHub repository or issue">
+        <div className="picker-heading"><span className="small-label">{isExtension ? "CONNECTED TO YOUR TAB" : "START WITH GITHUB"}</span><Github size={16} /></div>
         <form onSubmit={submit}>
-          {isExtension ? <div className="detected-issue"><CircleDot size={18} /><span>{issue ? <><strong>{issue.owner}/{issue.repo}</strong><span className="muted-copy"> Issue #{issue.number}</span></> : "Open a GitHub issue to get started"}</span>{issue && <a href={issue.url} target="_blank" rel="noreferrer noopener" aria-label="Open current issue on GitHub"><ArrowUpRight size={15} /></a>}</div> : <label className={`url-field ${inputError ? "invalid" : ""}`}><Link2 size={18} /><span className="sr-only">GitHub issue URL</span><input type="url" value={url} onChange={(event) => { setUrl(event.target.value); setInputError(null); }} placeholder="https://github.com/owner/repo/issues/123" spellCheck={false} autoComplete="off" aria-invalid={!!inputError} aria-describedby={inputError ? "issue-input-error" : undefined} /></label>}
+          {isExtension ? <div className="detected-issue"><CircleDot size={18} /><span>{issue ? <><strong>{issue.owner}/{issue.repo}</strong><span className="muted-copy"> Issue #{issue.number}</span></> : repository ? <><strong>{repository.owner}/{repository.repo}</strong><span className="muted-copy"> Repository</span></> : "Open a GitHub repository or issue"}</span>{(issue || repository) && <a href={(issue || repository)!.url} target="_blank" rel="noreferrer noopener" aria-label="Open current context on GitHub"><ArrowUpRight size={15} /></a>}</div> : <label className={`url-field ${inputError ? "invalid" : ""}`}><Link2 size={18} /><span className="sr-only">GitHub repository or issue URL</span><input type="url" value={url} onChange={(event) => { setUrl(event.target.value); setInputError(null); }} placeholder="https://github.com/owner/repo" spellCheck={false} autoComplete="off" aria-invalid={!!inputError} aria-describedby={inputError ? "issue-input-error" : undefined} /></label>}
           <button className="primary-button understand-button" type="submit" disabled={disabled}>{busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}<span>{busy ? "Investigating…" : "Understand"}</span>{!busy && <ArrowRight size={16} />}</button>
         </form>
-        {inputError ? <p id="issue-input-error" className="input-error" role="alert">{inputError}</p> : <p className="picker-note"><ShieldCheck size={12} /> Public repositories · Your code stays unchanged</p>}
+        {inputError ? <p id="issue-input-error" className="input-error" role="alert">{inputError}</p> : <p className="picker-note"><ShieldCheck size={12} /> Public repositories · Local launch requires explicit approval</p>}
       </section>
       {health.kind === "checking" && <div className="connection-note" role="status"><LoaderCircle size={14} className="spin" /> Checking the analysis service…</div>}
       {health.kind === "offline" && <Notice title="The analysis service is offline" description="Start the RepoLens server, then check the connection again." action="Check connection" onAction={() => setHealthVersion((value) => value + 1)} />}
       {health.kind === "ready" && !health.data.openaiConfigured && <Notice title="Analysis is not configured yet" description="Add an OpenAI API key to the server configuration, then check the connection again." action="Check connection" onAction={() => setHealthVersion((value) => value + 1)} />}
       {health.kind === "ready" && !health.data.githubConfigured && <div className="connection-note warning"><AlertCircle size={14} /> A GitHub token is not configured. Public API access may be limited.</div>}
-      {issue && configured && <SessionProvider key={`${issueKey(issue)}:${connectionVersion}`} issue={issue} requestToken={request?.key === issueKey(issue) ? request.token : null} onBusy={setBusy} onReset={resetConnection} />}
-      {!issue && <EmptyState extension={isExtension} />}
+      {issue && configured && <SessionProvider key={`${issueKey(issue)}:${connectionVersion}`} issue={issue} requestToken={request?.key === `issue:${issueKey(issue)}` ? request.token : null} onBusy={setBusy} onReset={resetConnection} />}
+      {repository && configured && <RepositorySessionProvider key={`${repositoryKey(repository)}:${connectionVersion}`} repository={repository} requestToken={request?.key === `repository:${repositoryKey(repository)}` ? request.token : null} onBusy={setBusy} onReset={resetConnection} />}
+      {!issue && !repository && <EmptyState extension={isExtension} />}
     </main>
     <footer className="site-footer"><span>Less digging. More understanding.</span><span className="powered-by">Built with <strong>CopilotKit</strong><span className="footer-dot">·</span> OpenAI</span></footer>
   </div>;
@@ -187,6 +198,77 @@ function AgentSession({ issue, requestToken, threadId, onBusy }: { issue: IssueR
       <CoverageFooter coverage={displayed.coverage} snapshot={displayed.snapshot} />
     </>}
     {!displayed?.analysis && !busy && !waiting && !localError && !failed && !stopped && current.status !== "empty" && <section className="ready-card"><span className="ready-icon"><CircleDot size={25} /></span><h2>Your issue. A clearer starting point.</h2><p>Click Understand to follow the discussion, explore relevant code, and see what is already known.</p><a href={issue.url} target="_blank" rel="noreferrer noopener" className="text-link">{issue.owner}/{issue.repo} #{issue.number}<ArrowUpRight size={14} /></a></section>}
+  </div>;
+}
+
+function RepositorySessionProvider({ repository, requestToken, onBusy, onReset }: { repository: RepositoryRef; requestToken: string | null; onBusy: (busy: boolean) => void; onReset: () => void }) {
+  const [threadId] = useState(() => crypto.randomUUID());
+  const [connectionError, setConnectionError] = useState(false);
+  return <CopilotKitProvider runtimeUrl={`${API_URL}/api/copilotkit`} agentId="repolens" enableInspector={false} showDevConsole={false} onError={(event) => { if (event.code === "runtime_info_fetch_failed") { setConnectionError(true); onBusy(false); } }}>
+    {connectionError ? <Notice title="The agent could not connect" description="The server is reachable, but its analysis connection is unavailable." action="Reconnect" onAction={onReset} /> : <RepositoryAgentSession repository={repository} requestToken={requestToken} threadId={threadId} onBusy={onBusy} />}
+  </CopilotKitProvider>;
+}
+
+function RepositoryAgentSession({ repository, requestToken, threadId, onBusy }: { repository: RepositoryRef; requestToken: string | null; threadId: string; onBusy: (busy: boolean) => void }) {
+  const { agent, isReady } = useAgent({ agentId: `repolens-repository-${threadId}`, runtimeAgentId: "repolens", threadId });
+  const { copilotkit } = useCopilotKit();
+  const [working, setWorking] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [completed, setCompleted] = useState<RepoLensState | null>(null);
+  const activeRun = useRef<string | null>(null);
+  const lastRequest = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useAgentContext({ description: "Current GitHub repository", value: repository });
+
+  const remote = agent.state as Partial<RepoLensState>;
+  const remoteRepository = remote.repository?.url ? parseRepositoryUrl(remote.repository.url) : null;
+  const matched = !!remoteRepository && repositoryKey(remoteRepository) === repositoryKey(repository) && remote.runId === activeRun.current && activeRun.current !== null;
+  const current = matched ? { ...initialRepositoryState(repository), ...remote } as RepoLensState : initialRepositoryState(repository);
+  const displayed = current.repositoryAnalysis ? current : completed;
+  const waiting = !!requestToken && lastRequest.current !== requestToken && !isReady;
+  const failed = matched && (current.status === "error" || current.status === "permission_denied");
+
+  useEffect(() => { onBusy(working || waiting); }, [working, waiting, onBusy]);
+  useEffect(() => {
+    if (!waiting) return;
+    const timeout = window.setTimeout(() => {
+      lastRequest.current = requestToken;
+      setLocalError("The agent connection is taking too long. Check that the server is running, then retry.");
+      onBusy(false);
+    }, 15000);
+    return () => window.clearTimeout(timeout);
+  }, [waiting, requestToken, onBusy]);
+  useEffect(() => { if (matched && current.repositoryAnalysis && current.repositoryAnalysisId) setCompleted(current); }, [matched, remote]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; activeRun.current = null; copilotkit.stopAgent({ agent }); onBusy(false); };
+  }, [agent, copilotkit, onBusy]);
+
+  const run = useCallback(async () => {
+    if (!isReady || working) return;
+    const runId = crypto.randomUUID();
+    activeRun.current = runId; setWorking(true); setLocalError(null); setCompleted(null);
+    try { await copilotkit.runAgent({ agent, runId, forwardedProps: { intent: "understand_repository", repository } }); }
+    catch (error) { if (mounted.current && activeRun.current === runId) setLocalError(error instanceof Error ? error.message : "The repository briefing was interrupted."); }
+    finally { if (mounted.current && activeRun.current === runId) setWorking(false); }
+  }, [agent, copilotkit, isReady, repository, working]);
+
+  useEffect(() => {
+    if (!requestToken || requestToken === lastRequest.current || !isReady || working) return;
+    lastRequest.current = requestToken;
+    void run();
+  }, [requestToken, isReady, working, run]);
+
+  const stop = () => { activeRun.current = null; copilotkit.stopAgent({ agent }); setWorking(false); };
+  return <div className="workspace">
+    {(working || waiting) && <section className="progress-card" role="status" aria-live="polite"><div className="progress-top"><span className="progress-icon"><BookOpen size={18} /></span><div><h2>{waiting ? "Connecting to your agent" : "Understanding this repository"}</h2><p>{current.phase || "Reading the README and project manifest…"}</p></div>{working && <button className="quiet-button" onClick={stop}><Square size={11} fill="currentColor" /> Stop</button>}</div>{current.activities.length > 0 && <ul className="activity-list">{current.activities.map(activity => <li key={activity.id} className={activity.status}>{activity.status === "running" ? <LoaderCircle size={13} className="spin" /> : activity.status === "done" ? <Check size={13} /> : <AlertCircle size={13} />}<span>{activity.label}</span></li>)}</ul>}<div className="progress-track"><span /></div></section>}
+    {(localError || failed) && <Notice title={current.status === "permission_denied" ? "This repository is not accessible" : "The repository briefing could not be completed"} description={current.error?.message || localError || "Please try again."} />}
+    {displayed?.repositoryAnalysis && <>
+      <RepositoryView analysis={displayed.repositoryAnalysis} sources={displayed.sources} metadata={displayed.repositoryMetadata} repository={repository} snapshot={displayed.snapshot} />
+      {displayed.launchProposal && displayed.repositoryAnalysisId && <LocalLaunchControl proposal={displayed.launchProposal} analysisId={displayed.repositoryAnalysisId} threadId={threadId} apiUrl={API_URL} />}
+      <CoverageFooter coverage={displayed.coverage} snapshot={displayed.snapshot} />
+    </>}
+    {!displayed?.repositoryAnalysis && !working && !waiting && !localError && !failed && <section className="ready-card"><span className="ready-icon"><BookOpen size={25} /></span><h2>A README you can understand quickly.</h2><p>Click Understand to see what the project does, the concepts that matter, and verified setup instructions.</p><a href={repository.url} target="_blank" rel="noreferrer noopener" className="text-link">{repository.owner}/{repository.repo}<ArrowUpRight size={14} /></a></section>}
   </div>;
 }
 

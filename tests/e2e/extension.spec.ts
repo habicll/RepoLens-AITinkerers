@@ -5,8 +5,9 @@ import { resolve } from "node:path";
 const firstIssue = "https://github.com/test-owner/test-repo/issues/184";
 const slowIssue = "https://github.com/test-owner/test-repo/issues/999";
 const nextIssue = "https://github.com/test-owner/test-repo/issues/185";
+const repositoryRoot = "https://github.com/test-owner/test-repo";
 
-test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results scoped to the current issue", async ({}, testInfo) => {
+test("packaged MV3 extension keeps CopilotKit results scoped to the current repository or issue", async ({}, testInfo) => {
   test.setTimeout(45_000);
   const extensionPath = resolve("dist-extension");
   await access(resolve(extensionPath, "manifest.json")); // Run npm run build before this spec.
@@ -18,7 +19,7 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
   const runtimeErrors: string[] = [];
   const cspErrors: string[] = [];
   const unexpectedRequests: string[] = [];
-  const runs: { forwardedProps: { intent: string; issue: { url: string } }; context?: { description: string; value: string }[]; threadId: string }[] = [];
+  const runs: { forwardedProps: { intent: string; issue?: { url: string }; repository?: { url: string } }; context?: { description: string; value: string }[]; threadId: string }[] = [];
   context.on("weberror", error => runtimeErrors.push(error.error().message));
   context.on("console", message => {
     if (/content security policy|\bCSP\b|refused to (?:execute|load|connect)/i.test(message.text())) cspErrors.push(message.text());
@@ -62,7 +63,7 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     const launcher = github.getByRole("button", { name: "Open RepoLens", exact: true });
     await expect(launcher).toBeVisible();
     await launcher.click();
-    const panel = github.frameLocator('iframe[title="RepoLens issue assistant"]');
+    const panel = github.frameLocator('iframe[title="RepoLens GitHub context assistant"]');
     await expect(panel.locator("body")).toBeVisible();
     expect(await panel.locator("html").evaluate(() => location.href)).toBe(`chrome-extension://${extensionId}/index.html?surface=overlay`);
     await expect(panel.getByText("CONNECTED TO YOUR TAB", { exact: true })).toBeVisible();
@@ -116,16 +117,25 @@ test("packaged MV3 extension detects GitHub tabs and keeps CopilotKit results sc
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toHaveCount(0);
     await github.screenshot({ path: testInfo.outputPath("extension-briefing.png"), fullPage: false });
 
-    expect(runs.map(run => [run.forwardedProps.intent, run.forwardedProps.issue.url])).toEqual([
-      ["understand", firstIssue], ["propose_solution", firstIssue], ["implement_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue],
+    await github.goto(repositoryRoot);
+    await github.getByRole("button", { name: "Open RepoLens", exact: true }).click();
+    await expect(panel.locator(".detected-issue")).toContainText("Repository");
+    await panel.getByRole("button", { name: "Understand", exact: true }).click();
+    await expect(panel.getByRole("heading", { name: "What this project is" })).toBeVisible();
+    await expect(panel.getByText("RepoLens turns GitHub context into a concise, source-backed engineering briefing.")).toBeVisible();
+    await expect(panel.getByRole("heading", { name: "Launch this project on this computer" })).toBeVisible();
+    await github.screenshot({ path: testInfo.outputPath("extension-repository.png"), fullPage: false });
+
+    expect(runs.map(run => [run.forwardedProps.intent, run.forwardedProps.issue?.url || run.forwardedProps.repository?.url])).toEqual([
+      ["understand", firstIssue], ["propose_solution", firstIssue], ["implement_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue], ["understand_repository", repositoryRoot],
     ]);
     for (const run of runs) {
-      const currentIssue = run.context?.find(item => item.description === "Current GitHub issue");
-      expect(currentIssue).toBeDefined();
-      expect(JSON.parse(currentIssue!.value).url).toBe(run.forwardedProps.issue.url);
+      const currentContext = run.context?.find(item => item.description === (run.forwardedProps.issue ? "Current GitHub issue" : "Current GitHub repository"));
+      expect(currentContext).toBeDefined();
+      expect(JSON.parse(currentContext!.value).url).toBe(run.forwardedProps.issue?.url || run.forwardedProps.repository?.url);
     }
-    expect(runs[0].threadId).not.toBe(runs[4].threadId);
-    expect(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.url)).toBe(nextIssue);
+    expect(runs[0].threadId).not.toBe(runs[5].threadId);
+    expect(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.url)).toBe(repositoryRoot);
     expect(await panel.locator("html").evaluate(() => (window as Window & { __extensionCspViolations?: string[] }).__extensionCspViolations ?? [])).toEqual([]);
     expect(cspErrors).toEqual([]);
     expect(runtimeErrors).toEqual([]);

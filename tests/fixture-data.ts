@@ -1,5 +1,5 @@
 // Synthetic data for automated tests only. Never imported by the application.
-import { initialState, type RepoLensState, type IssueRef } from "../shared/contracts.js";
+import { initialRepositoryState, initialState, type RepoLensState, type IssueRef, type RepositoryRef } from "../shared/contracts.js";
 
 export function fixtureState(issue: IssueRef, runId = "fixture-run"): RepoLensState {
   const state = initialState(issue);
@@ -31,5 +31,35 @@ export function fixtureState(issue: IssueRef, runId = "fixture-run"): RepoLensSt
   state.status = "complete";
   state.phase = "Analysis ready";
   state.activities = [{ id: "comments", label: "Read 28 comments", status: "done" }, { id: "code", label: "Read 2 relevant files", status: "done" }];
+  return state;
+}
+
+export function fixtureRepositoryState(repository: RepositoryRef, runId = "fixture-repository-run"): RepoLensState {
+  const state = initialRepositoryState(repository);
+  const sha = "b".repeat(40);
+  state.runId = runId;
+  state.repositoryMetadata = { name: repository.repo, description: "An evidence-backed GitHub context assistant", language: "TypeScript", stars: 128, topics: ["github", "agents"], license: "MIT" };
+  state.snapshot = { id: "fixture-repository-snapshot", commitSha: sha, branch: "main", fetchedAt: "2026-09-12T10:00:00Z" };
+  state.coverage = { commentsTotal: 0, commentsRead: 0, commentsTruncated: false, filesRead: 2, pathsDiscovered: 18, treeTruncated: false, codeSearch: "not_used", limits: [] };
+  state.sources = [
+    { id: "repository:metadata", kind: "repository", label: `${repository.owner}/${repository.repo}`, url: repository.url, excerpt: "An evidence-backed GitHub context assistant written in TypeScript." },
+    { id: "readme:root", kind: "readme", label: "README.md:1–40", url: `${repository.url}/blob/${sha}/README.md`, path: "README.md", lineStart: 1, lineEnd: 40, excerpt: "RepoLens explains GitHub repositories and issues. Run npm ci, then npm run dev." },
+    { id: "file:package.json", kind: "file", label: "package.json:1–20", url: `${repository.url}/blob/${sha}/package.json`, path: "package.json", lineStart: 1, lineEnd: 20, excerpt: "scripts: dev, test, build" },
+  ];
+  state.repositoryAnalysisId = "11111111-1111-4111-8111-111111111111";
+  state.repositoryAnalysis = {
+    summary: { text: "RepoLens turns GitHub context into a concise, source-backed engineering briefing.", sourceIds: ["readme:root"] },
+    whatItDoes: { text: "It reads a repository or issue and surfaces only the context needed to start working.", sourceIds: ["readme:root"] },
+    audience: { text: "Developers joining a repository or picking up a complex issue.", sourceIds: ["readme:root"] },
+    keyConcepts: [{ text: "GitHub evidence remains linked to every factual statement.", sourceIds: ["readme:root"] }],
+    architecture: [{ text: "The project uses a TypeScript client, server, shared contracts, and a Chrome extension.", sourceIds: ["readme:root", "file:package.json"] }],
+    quickStart: [{ text: "Install dependencies with npm ci, then start development with npm run dev.", sourceIds: ["readme:root", "file:package.json"] }],
+    importantSections: [{ title: "Architecture", explanation: "Explains how GitHub context moves through the application.", sourceIds: ["readme:root"] }],
+    unknowns: ["The fixture does not execute the documented commands."],
+  };
+  state.launchProposal = { status: "disabled", runtime: "Node.js + npm", commands: ["npm ci", "npm run dev"], reason: "Local execution is disabled on this RepoLens server.", requiresApproval: true };
+  state.status = "complete";
+  state.phase = "Repository briefing ready";
+  state.activities = [{ id: "readme", label: "Read README and package.json", status: "done" }];
   return state;
 }
