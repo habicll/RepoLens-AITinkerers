@@ -5,10 +5,17 @@ import { AppError } from "./errors.js";
 const API = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 const MAX_RESPONSE_BYTES = 2_000_000;
+const CACHE_TTL_MS = 2 * 60_000;
+const MAX_CACHE_ENTRIES = 96;
 
 type JsonObject = Record<string, unknown>;
-type OptionalState = "available" | "unavailable" | "permission_denied";
+type OptionalState = "available" | "unavailable" | "permission_denied" | "rate_limited";
 type RequestResult = { state: OptionalState; data: unknown };
+type CacheEntry = { data: unknown; expiresAt: number };
+
+// Forensics retries reuse successful public GitHub responses for two minutes.
+// Keeping caches per transport also isolates tests and custom clients.
+const caches = new WeakMap<typeof fetch, Map<string, CacheEntry>>();
 
 export interface ForensicsCommitSeed {
   sha: string;
@@ -70,9 +77,11 @@ export interface ForensicsSeed {
 }
 export interface ForensicsInspection {
   commits: ForensicsCommitDetail[];
+  commitsInspected: number;
   deployments: ForensicsDeployment[];
   sources: Source[];
   pullRequestsFound: number;
+  limits: string[];
 }
 
 function object(value: unknown): JsonObject {
@@ -102,6 +111,8 @@ export class GitHubForensicsRepository {
   private readonly prefix: string;
   private readonly fullName: string;
   private readonly transport: typeof fetch;
+  private readonly cache: Map<string, CacheEntry>;
+  private rateRemaining: number | null = null;
 
   constructor(
     private readonly issue: IssueRef,
@@ -113,10 +124,17 @@ export class GitHubForensicsRepository {
     if (options.allowedRepos?.length && !options.allowedRepos.some(repo => repo.toLowerCase() === this.fullName.toLowerCase())) throw new AppError("REPOSITORY_NOT_ALLOWED", "This repository is not enabled on the demo server.", 403);
     this.prefix = `/repos/${encodeURIComponent(issue.owner)}/${encodeURIComponent(issue.repo)}`;
     this.transport = options.fetch ?? globalThis.fetch;
+    let cache = caches.get(this.transport);
+    if (!cache) { cache = new Map(); caches.set(this.transport, cache); }
+    this.cache = cache;
   }
 
   private async request(path: string, optional = false): Promise<RequestResult> {
     this.signal.throwIfAborted();
+    const cacheKey = `${this.options.token ? "authenticated" : "public"}:${path}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return { state: "available", data: structuredClone(cached.data) };
+    if (cached) this.cache.delete(cacheKey);
     let response: Response;
     try {
       response = await this.transport(`${API}${path}`, {
@@ -132,8 +150,18 @@ export class GitHubForensicsRepository {
       if (optional) return { state: "unavailable", data: null };
       throw new AppError("GITHUB_UNAVAILABLE", "Could not reach GitHub during the Forensics investigation.", 502, true);
     }
+    const remainingHeader = response.headers.get("x-ratelimit-remaining");
+    const remaining = remainingHeader === null ? Number.NaN : Number(remainingHeader);
+    if (Number.isSafeInteger(remaining) && remaining >= 0) this.rateRemaining = this.rateRemaining === null ? remaining : Math.min(this.rateRemaining, remaining);
     const rateLimited = response.status === 429 || (response.status === 403 && (response.headers.get("x-ratelimit-remaining") === "0" || response.headers.has("retry-after")));
-    if (rateLimited) { void response.body?.cancel().catch(() => undefined); throw new AppError("GITHUB_RATE_LIMIT", "GitHub's rate limit was reached during the Forensics investigation.", 429, true); }
+    if (rateLimited) {
+      void response.body?.cancel().catch(() => undefined);
+      if (optional) return { state: "rate_limited", data: null };
+      const resetSeconds = Number(response.headers.get("x-ratelimit-reset"));
+      const resetAt = Number.isSafeInteger(resetSeconds) && resetSeconds > 0 ? new Date(resetSeconds * 1_000) : null;
+      const resetHint = resetAt && Number.isFinite(resetAt.getTime()) ? ` The public quota resets at ${resetAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}.` : "";
+      throw new AppError("GITHUB_RATE_LIMIT", `GitHub's rate limit was reached during the Forensics investigation.${resetHint} Configure GITHUB_TOKEN to use the authenticated quota.`, 429, true);
+    }
     if (optional && [401, 403].includes(response.status)) { void response.body?.cancel().catch(() => undefined); return { state: "permission_denied", data: null }; }
     if (optional && [404, 410, 422].includes(response.status)) { void response.body?.cancel().catch(() => undefined); return { state: "unavailable", data: null }; }
     if ([401, 403].includes(response.status)) { void response.body?.cancel().catch(() => undefined); throw new AppError("PERMISSION_DENIED", "GitHub denied access to the issue investigation.", 403); }
@@ -143,7 +171,12 @@ export class GitHubForensicsRepository {
     if (Number(response.headers.get("content-length") ?? 0) > MAX_RESPONSE_BYTES) { void response.body?.cancel().catch(() => undefined); throw new AppError("RESPONSE_TOO_LARGE", "A GitHub Forensics response exceeded the retrieval budget.", 413); }
     const raw = await response.text();
     if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new AppError("RESPONSE_TOO_LARGE", "A GitHub Forensics response exceeded the retrieval budget.", 413);
-    try { return { state: "available", data: JSON.parse(raw) }; }
+    try {
+      const data: unknown = JSON.parse(raw);
+      this.cache.set(cacheKey, { data: structuredClone(data), expiresAt: Date.now() + CACHE_TTL_MS });
+      while (this.cache.size > MAX_CACHE_ENTRIES) this.cache.delete(this.cache.keys().next().value as string);
+      return { state: "available", data };
+    }
     catch { throw new AppError("GITHUB_INVALID_RESPONSE", "GitHub returned invalid JSON during Forensics.", 502, true); }
   }
 
@@ -152,37 +185,41 @@ export class GitHubForensicsRepository {
     if (!Number.isFinite(issueTime.getTime())) throw new AppError("FORENSICS_MISSING_DATE", "The issue creation time is unavailable; run Understand again.", 409);
     const end = issueTime.toISOString();
     const start = new Date(issueTime.getTime() - windowDays * 86_400_000).toISOString();
-    const repository = object((await this.request(this.prefix)).data);
-    if (repository.private !== false || text(repository.full_name).toLowerCase() !== this.fullName.toLowerCase()) throw new AppError("PERMISSION_DENIED", "Forensics currently supports public repositories only.", 403);
+    // The saved Understand session already verified repository identity and public visibility.
 
     report("Reading the issue timeline and recent changes");
     const [timelineResult, commitsResult] = await Promise.all([
-      this.request(`${this.prefix}/issues/${this.issue.number}/timeline?per_page=100`),
+      this.request(`${this.prefix}/issues/${this.issue.number}/timeline?per_page=100`, true),
       this.request(`${this.prefix}/commits?since=${encodeURIComponent(start)}&until=${encodeURIComponent(end)}&per_page=40`),
     ]);
-    if (!Array.isArray(timelineResult.data) || !Array.isArray(commitsResult.data)) throw new AppError("GITHUB_INVALID_RESPONSE", "GitHub returned invalid timeline or commit data.", 502, true);
+    if (!Array.isArray(commitsResult.data)) throw new AppError("GITHUB_INVALID_RESPONSE", "GitHub returned invalid recent commit data.", 502, true);
+    const timelineData = timelineResult.state === "available" && Array.isArray(timelineResult.data) ? timelineResult.data : [];
     const sources: Source[] = [];
-    const timeline = this.parseTimeline(timelineResult.data, sources);
+    const timeline = this.parseTimeline(timelineData, sources);
     const commits = this.parseCommits(commitsResult.data);
 
     report("Checking CI workflows and deployments");
     const createdRange = `${start}..${end}`;
-    const [actionsResult, deploymentsResult] = await Promise.all([
-      this.request(`${this.prefix}/actions/runs?per_page=100&created=${encodeURIComponent(createdRange)}`, true),
-      this.request(`${this.prefix}/deployments?per_page=100`, true),
-    ]);
+    const preservePublicQuota = !this.options.token && this.rateRemaining !== null && this.rateRemaining < 10;
+    const [actionsResult, deploymentsResult] = preservePublicQuota
+      ? [{ state: "rate_limited" as const, data: null }, { state: "rate_limited" as const, data: null }]
+      : await Promise.all([
+        this.request(`${this.prefix}/actions/runs?per_page=100&created=${encodeURIComponent(createdRange)}`, true),
+        this.request(`${this.prefix}/deployments?per_page=100`, true),
+      ]);
     const workflows = this.parseWorkflows(actionsResult, start, end, sources);
     const deployments = this.parseDeployments(deploymentsResult, start, end);
     const limits: string[] = [];
     if (commits.length === 40) limits.push("Only the first 40 commits in the seven-day window were considered.");
-    if (timelineResult.data.length === 100) limits.push("Only the first 100 issue timeline events were considered.");
-    if (actionsResult.state !== "available") limits.push(actionsResult.state === "permission_denied" ? "GitHub Actions was not accessible with the configured permissions." : "GitHub Actions data was unavailable.");
-    if (deploymentsResult.state !== "available") limits.push(deploymentsResult.state === "permission_denied" ? "Deployments were not accessible with the configured permissions." : "Deployment data was unavailable.");
+    if (timelineData.length === 100) limits.push("Only the first 100 issue timeline events were considered.");
+    if (timelineResult.state !== "available") limits.push(timelineResult.state === "permission_denied" ? "The issue timeline was not accessible with the configured permissions." : timelineResult.state === "rate_limited" ? "The issue timeline was skipped because the GitHub quota was exhausted." : "The issue timeline was unavailable.");
+    if (actionsResult.state !== "available") limits.push(actionsResult.state === "permission_denied" ? "GitHub Actions was not accessible with the configured permissions." : actionsResult.state === "rate_limited" ? "GitHub Actions was skipped to preserve the remaining GitHub quota." : "GitHub Actions data was unavailable.");
+    if (deploymentsResult.state !== "available") limits.push(deploymentsResult.state === "permission_denied" ? "Deployments were not accessible with the configured permissions." : deploymentsResult.state === "rate_limited" ? "Deployments were skipped to preserve the remaining GitHub quota." : "Deployment data was unavailable.");
     else if (Array.isArray(deploymentsResult.data) && deploymentsResult.data.length === 100) limits.push("Only the latest 100 deployments were available; an older deployment in this window may be missing.");
     return {
       timeline, commits, workflows, deployments, sources: uniqueSources(sources),
       coverage: {
-        windowStart: start, windowEnd: end, windowDays, timelineEventsRead: timelineResult.data.length,
+        windowStart: start, windowEnd: end, windowDays, timelineEventsRead: timelineData.length,
         commitsConsidered: commits.length, commitsInspected: 0, pullRequestsFound: 0,
         actions: actionsResult.state, deployments: deploymentsResult.state, limits,
       },
@@ -191,24 +228,32 @@ export class GitHubForensicsRepository {
 
   async inspect(commits: ForensicsCommitSeed[], deployments: ForensicsDeployment[], report: (label: string) => void): Promise<ForensicsInspection> {
     report("Inspecting the strongest commit candidates");
-    const detailResults = await Promise.all(commits.slice(0, 6).map(async (commit, index) => {
-      const detailResult = await this.request(`${this.prefix}/commits/${encodeURIComponent(commit.sha)}`);
-      const pullsResult = index < 4 ? await this.request(`${this.prefix}/commits/${encodeURIComponent(commit.sha)}/pulls?per_page=10`, true) : { state: "unavailable" as const, data: null };
-      const detail = object(detailResult.data);
+    const limits: string[] = [];
+    const candidates = commits.slice(0, 3);
+    if (commits.length > candidates.length) limits.push("Only the three strongest commit candidates were inspected to keep the investigation within its GitHub request budget.");
+    const detailResults = await Promise.all(candidates.map(async (commit) => {
+      const [detailResult, pullsResult] = await Promise.all([
+        this.request(`${this.prefix}/commits/${encodeURIComponent(commit.sha)}`, true),
+        this.request(`${this.prefix}/commits/${encodeURIComponent(commit.sha)}/pulls?per_page=10`, true),
+      ]);
+      const detail = detailResult.state === "available" ? object(detailResult.data) : {};
       const files = Array.isArray(detail.files) ? detail.files.slice(0, 30).map(file => text(object(file).filename, 500)).filter(Boolean) : [];
+      const limited = detailResult.state === "rate_limited" || pullsResult.state === "rate_limited" ? `GitHub quota prevented full inspection of commit ${commit.sha.slice(0, 7)}.` : null;
       const sourceId = `commit:${commit.sha}`;
       const commitSource: Source = {
         id: sourceId, kind: "commit", label: `Commit ${commit.sha.slice(0, 7)}`, url: commit.url,
         createdAt: commit.timestamp, author: commit.author,
-        excerpt: `Commit: ${commit.sha}\nTimestamp: ${commit.timestamp}\nAuthor: ${commit.author}\nMessage: ${commit.message}\nChanged files: ${files.join(", ") || "not returned"}`,
+        excerpt: `Commit: ${commit.sha}\nTimestamp: ${commit.timestamp}\nAuthor: ${commit.author}\nMessage: ${commit.message}\nChanged files: ${files.join(", ") || "unavailable"}`,
       };
       const pull = this.parsePull(pullsResult, commit.sha);
-      return { ...commit, files, sourceId, pull, sources: [commitSource, ...(pull ? [this.pullSource(pull)] : [])] };
+      return { ...commit, files, sourceId, pull, detailAvailable: detailResult.state === "available", limited,
+        sources: [commitSource, ...(pull ? [this.pullSource(pull)] : [])] };
     }));
     const inspectedShas = new Set(detailResults.map(commit => commit.sha));
-    const relatedDeployments = deployments.filter(deployment => inspectedShas.has(deployment.sha)).slice(0, 3);
+    const relatedDeployments = deployments.filter(deployment => inspectedShas.has(deployment.sha)).slice(0, 2);
     const deploymentResults = await Promise.all(relatedDeployments.map(async deployment => {
       const statuses = await this.request(`${this.prefix}/deployments/${deployment.id}/statuses?per_page=1`, true);
+      const limited = statuses.state === "rate_limited" ? `GitHub quota prevented reading the status of deployment ${deployment.id}.` : null;
       let status: string | null = null;
       let timestampValue = deployment.timestamp;
       if (statuses.state === "available" && Array.isArray(statuses.data) && statuses.data.length) {
@@ -222,13 +267,15 @@ export class GitHubForensicsRepository {
         url: enriched.url, createdAt: enriched.timestamp,
         excerpt: `Deployment: ${enriched.id}\nEnvironment: ${enriched.environment}\nCommit: ${enriched.sha}\nCreated: ${deployment.timestamp}\nLatest status: ${enriched.status ?? "unavailable"}`,
       };
-      return { deployment: enriched, source };
+      return { deployment: enriched, source, limited };
     }));
     return {
-      commits: detailResults.map(({ sources: _sources, ...commit }) => commit),
+      commits: detailResults.map(({ sources: _sources, detailAvailable: _detailAvailable, limited: _limited, ...commit }) => commit),
+      commitsInspected: detailResults.filter(result => result.detailAvailable).length,
       deployments: deploymentResults.map(result => result.deployment),
       sources: uniqueSources([...detailResults.flatMap(result => result.sources), ...deploymentResults.map(result => result.source)]),
       pullRequestsFound: new Set(detailResults.flatMap(commit => commit.pull ? [commit.pull.number] : [])).size,
+      limits: [...new Set([...limits, ...detailResults.flatMap(result => result.limited ? [result.limited] : []), ...deploymentResults.flatMap(result => result.limited ? [result.limited] : [])])],
     };
   }
 

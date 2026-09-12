@@ -179,7 +179,8 @@ export async function investigateIssue(options: {
       timeline: buildTimeline(options.issue, issueCreatedAt, issueEvidence.id, seed, drafts.slice(0, 3), inspection.deployments), candidates,
       facts: uniqueClaims(candidates.flatMap(candidate => candidate.facts), 10),
       inferences: uniqueClaims([...candidates.flatMap(candidate => candidate.inference ? [candidate.inference] : []), ...reasoning.inferences], 5),
-      coverage: { ...seed.coverage, commitsInspected: inspection.commits.length, pullRequestsFound: inspection.pullRequestsFound },
+      coverage: { ...seed.coverage, commitsInspected: inspection.commitsInspected, pullRequestsFound: inspection.pullRequestsFound,
+        limits: [...new Set([...seed.coverage.limits, ...inspection.limits])].slice(0, 10) },
     });
     return { result, sources: allSources };
   }

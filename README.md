@@ -61,13 +61,19 @@ cp .env.example .env
 
 Renseignez `OPENAI_API_KEY` dans `.env`. Ce fichier est ignoré par Git. **Ne mettez jamais de secret dans une variable `VITE_`** : ces variables sont publiques et compilées dans le frontend.
 
+Pour une démo Forensics stable, utilisez aussi l'authentification du GitHub CLI déjà connecté :
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" npm run dev
+```
+
 ## Variables d'environnement
 
 | Variable | Utilisation |
 | --- | --- |
 | `OPENAI_API_KEY` | Obligatoire pour une vraie analyse ; serveur uniquement. |
 | `OPENAI_MODEL` | Modèle compatible Responses, function calling et Structured Outputs ; défaut `gpt-5.4`. |
-| `GITHUB_TOKEN` | Facultatif pour les repos publics, recommandé pour les quotas et la recherche de contenu. |
+| `GITHUB_TOKEN` | Facultatif pour les repos publics, fortement recommandé pour Forensics, les quotas et la recherche de contenu. |
 | `PORT` | Port du backend, `3001` par défaut. |
 | `HOST` | Adresse locale, `127.0.0.1` par défaut. Le MVP refuse une écoute publique. |
 | `GITHUB_ALLOWED_REPOS` | Liste facultative `owner/repo,other/repo` limitant la démo. |
@@ -128,11 +134,11 @@ Le code du repository s'exécute avec les permissions du compte local. Le lanceu
 
 ## Issue Forensics
 
-Forensics ne démarre jamais avec l'analyse normale. Après le clic **Investigate issue**, le serveur prend la date de création comme premier signalement et inspecte la fenêtre précédente configurée. Il récupère au maximum 40 commits, détaille les six meilleurs et cherche une PR associée pour les quatre premiers. Timeline, commits et PR utilisent les APIs GitHub principales ; Actions et déploiements enrichissent le résultat quand les droits le permettent.
+Forensics ne démarre jamais avec l'analyse normale. Après le clic **Investigate issue**, le serveur prend la date de création comme premier signalement et inspecte la fenêtre précédente configurée. Il récupère au maximum 40 commits, puis détaille les trois meilleurs et cherche leur PR associée. Timeline, commits et PR utilisent les APIs GitHub principales ; Actions et déploiements enrichissent le résultat quand les droits le permettent. Un cache de deux minutes évite qu'un retry immédiat répète les appels déjà réussis.
 
 Le score de base est calculé dans le code avec la proximité temporelle, les chemins modifiés, les références de la timeline, un échec CI et la présence dans un déploiement. OpenAI reçoit ensuite un contexte compact pour comparer le sens de l'issue aux titres, messages et chemins. Cette passe ajoute uniquement la pertinence sémantique et le résumé. L'interface affiche `HIGH`, `MEDIUM` ou `LOW`, jamais un pourcentage artificiel.
 
-Un candidat `LOW` ne devient pas automatiquement un coupable. En l'absence de signal suffisant, la vue indique **No strong evidence found**. Les échecs Actions, déploiements ou OpenAI restent isolés : le briefing normal demeure accessible.
+Un candidat `LOW` ne devient pas automatiquement un coupable. En l'absence de signal suffisant, la vue indique **No strong evidence found**. Une timeline, Actions ou les déploiements indisponibles dégradent seulement la couverture ; ils n'annulent plus une enquête qui possède encore les commits récents. Le briefing normal demeure accessible si Forensics ou OpenAI échoue.
 
 ## Provenance et limites
 

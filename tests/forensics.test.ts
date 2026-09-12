@@ -33,8 +33,8 @@ function reader(commits = seed().commits): ForensicsReader {
     collect: vi.fn(async () => seed(commits)),
     inspect: vi.fn(async (selected: ForensicsCommitSeed[]) => ({ commits: selected.map(commit => ({ ...commit, files: ["src/auth/middleware.ts", "src/auth/session.ts"], sourceId: `commit:${commit.sha}`,
       pull: { number: 461, title: "OAuth session refactor", url: "https://github.com/demo/project/pull/461", mergedAt: "2026-09-12T08:32:00.000Z", mergeCommitSha: commit.sha, sourceId: "pull_request:461" } })),
-      deployments: commits.length ? [{ ...seed().deployments[0]!, status: "success" }] : [], pullRequestsFound: commits.length ? 1 : 0,
-      sources: commits.length ? [
+      deployments: commits.length ? [{ ...seed().deployments[0]!, status: "success" }] : [], commitsInspected: selected.length, pullRequestsFound: commits.length ? 1 : 0,
+      limits: [], sources: commits.length ? [
         { id: `commit:${sha}`, kind: "commit", label: "Commit 8fd22ab", url: `https://github.com/demo/project/commit/${sha}`, createdAt: "2026-09-12T08:30:00.000Z", excerpt: "OAuth session refactor changed authentication files." },
         { id: "pull_request:461", kind: "pull_request", label: "PR #461", url: "https://github.com/demo/project/pull/461", createdAt: "2026-09-12T08:32:00.000Z", excerpt: "OAuth session refactor." },
         { id: "deployment:93", kind: "deployment", label: "Deployment 93", url: "https://github.com/demo/project/deployments", createdAt: "2026-09-12T08:51:00.000Z", excerpt: "Production deployment succeeded." },
@@ -77,7 +77,7 @@ describe("Forensics analysis", () => {
     const evidence: Source = { id: `commit:${unrelated.sha}`, kind: "commit", label: "Commit ccccccc", url: unrelated.url, createdAt: unrelated.timestamp, excerpt: "Update contributor guide. Changed docs/contributing.md." };
     const lowReader: ForensicsReader = {
       collect: async () => seed([unrelated]),
-      inspect: async () => ({ commits: [{ ...unrelated, files: ["docs/contributing.md"], sourceId: evidence.id, pull: null }], deployments: [], sources: [evidence], pullRequestsFound: 0 }),
+      inspect: async () => ({ commits: [{ ...unrelated, files: ["docs/contributing.md"], sourceId: evidence.id, pull: null }], commitsInspected: 1, deployments: [], sources: [evidence], pullRequestsFound: 0, limits: [] }),
     };
     const complete = vi.fn<Complete>().mockResolvedValue(modelResponse({ summary: { text: "The available change is not semantically related to the authentication report.", sourceIds: [evidence.id, "issue-1"] },
       assessments: [{ candidateId: "candidate:commit-cccccccccccc", semanticRelevance: "low", inference: "The documentation update is unlikely to explain the session failure.", sourceIds: [evidence.id, "issue-1"] }], inferences: [] }));
@@ -104,7 +104,6 @@ describe("GitHub Forensics retrieval", () => {
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
     const fetcher = vi.fn(async (input: string | URL | Request): Promise<Response> => {
       const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url); requests.push(url);
-      if (url.pathname === "/repos/demo/project") return json({ full_name: "demo/project", private: false });
       if (url.pathname.endsWith("/issues/12/timeline")) return json([]);
       if (url.pathname.endsWith("/commits") && !url.pathname.includes(sha)) return json([{ sha, html_url: `https://github.com/demo/project/commit/${sha}`, author: { login: "dev" }, commit: { message: "OAuth session refactor", author: { name: "Dev", date: "2026-09-12T08:30:00Z" }, committer: { date: "2026-09-12T08:30:00Z" } } }]);
       if (url.pathname.endsWith("/actions/runs")) return json({}, 403);
@@ -120,8 +119,54 @@ describe("GitHub Forensics retrieval", () => {
     expect(collected.coverage.limits.join(" ")).toContain("GitHub Actions was not accessible");
     const inspected = await repository.inspect(collected.commits, collected.deployments, () => undefined);
     expect(inspected.commits[0]).toMatchObject({ files: ["src/auth/session.ts"], pull: { number: 461 } });
+    expect(inspected.commitsInspected).toBe(1);
     expect(inspected.deployments[0]).toMatchObject({ id: 93, status: "success" });
     expect(requests.some(url => url.searchParams.get("per_page") === "40")).toBe(true);
-    expect(requests).toHaveLength(8);
+    expect(requests).toHaveLength(7);
+  });
+
+  it("keeps recent commits usable when optional timeline and enrichment hit the public quota", async () => {
+    const requests: URL[] = [];
+    const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", ...headers } });
+    const fetcher = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url); requests.push(url);
+      if (url.pathname.endsWith("/issues/12/timeline")) return json({}, 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789218514" });
+      if (url.pathname.endsWith("/commits")) return json([{ sha, html_url: `https://github.com/demo/project/commit/${sha}`, author: { login: "dev" }, commit: { message: "OAuth session refactor", author: { date: "2026-09-12T08:30:00Z" }, committer: { date: "2026-09-12T08:30:00Z" } } }]);
+      throw new Error(`Unexpected request ${url.pathname}`);
+    }) as typeof fetch;
+    const repository = new GitHubForensicsRepository(issue, { fetch: fetcher }, new AbortController().signal);
+    const collected = await repository.collect(issueCreatedAt, 7, () => undefined);
+    expect(collected.commits).toHaveLength(1);
+    expect(collected.coverage).toMatchObject({ timelineEventsRead: 0, actions: "rate_limited", deployments: "rate_limited" });
+    expect(collected.coverage.limits.join(" ")).toContain("issue timeline was skipped");
+    expect(requests).toHaveLength(2);
+  });
+
+  it("reuses successful GitHub responses for an immediate retry", async () => {
+    const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+    const fetcher = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (url.pathname.endsWith("/issues/12/timeline")) return json([]);
+      if (url.pathname.endsWith("/commits")) return json([]);
+      if (url.pathname.endsWith("/actions/runs")) return json({ workflow_runs: [] });
+      if (url.pathname.endsWith("/deployments")) return json([]);
+      throw new Error(`Unexpected request ${url.pathname}`);
+    }) as typeof fetch;
+    await new GitHubForensicsRepository(issue, { fetch: fetcher }, new AbortController().signal).collect(issueCreatedAt, 7, () => undefined);
+    await new GitHubForensicsRepository(issue, { fetch: fetcher }, new AbortController().signal).collect(issueCreatedAt, 7, () => undefined);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps a temporal candidate when GitHub cannot return commit details", async () => {
+    const fetcher = vi.fn(async (): Promise<Response> => new Response("{}", {
+      status: 403,
+      headers: { "content-type": "application/json", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789218514" },
+    })) as typeof fetch;
+    const repository = new GitHubForensicsRepository(issue, { fetch: fetcher }, new AbortController().signal);
+    const inspected = await repository.inspect(seed().commits, [], () => undefined);
+    expect(inspected.commits).toHaveLength(1);
+    expect(inspected.commits[0]).toMatchObject({ sha, files: [], pull: null });
+    expect(inspected.commitsInspected).toBe(0);
+    expect(inspected.limits.join(" ")).toContain("prevented full inspection");
   });
 });

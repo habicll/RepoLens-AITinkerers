@@ -149,8 +149,8 @@ export const ForensicsCoverageSchema = z.object({
   commitsConsidered: z.number().int().nonnegative(),
   commitsInspected: z.number().int().nonnegative(),
   pullRequestsFound: z.number().int().nonnegative(),
-  actions: z.enum(["available", "unavailable", "permission_denied"]),
-  deployments: z.enum(["available", "unavailable", "permission_denied"]),
+  actions: z.enum(["available", "unavailable", "permission_denied", "rate_limited"]),
+  deployments: z.enum(["available", "unavailable", "permission_denied", "rate_limited"]),
   limits: z.array(z.string().min(1).max(500)).max(10),
 });
 export type ForensicsCoverage = z.infer<typeof ForensicsCoverageSchema>;
