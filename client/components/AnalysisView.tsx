@@ -42,12 +42,12 @@ export function SourceChips({ ids }: { ids: string[] }) {
   return <span className="source-chips">{[...new Set(ids)].map((id) => {
     const source = byId.get(id);
     if (!source) return null;
-    const label = source.path?.split("/").pop() || (source.kind === "comment" ? (source.author ? `@${source.author}` : "Comment") : source.kind === "issue" ? "Issue" : source.kind === "repository" ? "Repository" : "README");
+    const label = source.path?.split("/").pop() || (source.kind === "comment" ? (source.author ? `@${source.author}` : "Comment") : source.kind === "issue" ? "Issue" : source.kind === "repository" ? "Repository" : source.kind === "pull_request" ? "Pull request" : source.kind === "commit" ? "Commit" : source.kind === "workflow" ? "Workflow" : source.kind === "deployment" ? "Deployment" : source.kind === "timeline" ? "Timeline" : "README");
     return <button key={id} type="button" className="source-chip" onClick={() => select(source)} title={`Read source: ${source.label}`} aria-label={`Read source: ${source.label}`}><Link2 size={11} /><span>{label}</span></button>;
   })}</span>;
 }
 
-function ClaimText({ claim, className = "" }: { claim: Claim; className?: string }) {
+export function ClaimText({ claim, className = "" }: { claim: Claim; className?: string }) {
   return <div className={`claim ${className}`}><p>{claim.text}</p><SourceChips ids={claim.sourceIds} /></div>;
 }
 

@@ -2208,6 +2208,108 @@ svg {
   }
 }
 
+/* Issue Forensics is an evidence view, separate from the issue briefing. */
+.forensics-entry {
+  margin-top:14px;
+  padding:18px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  border:1px solid #dddfea;
+  border-radius:12px;
+  background:linear-gradient(135deg,rgba(91,84,223,.045),rgba(255,255,255,.7));
+}
+.forensics-entry>div { display:flex;align-items:center;gap:12px;min-width:0; }
+.forensics-entry-icon { width:38px;height:38px;display:grid;place-items:center;flex:0 0 auto;border:1px solid #ddd8fa;border-radius:10px;color:#6258d8;background:#f1efff; }
+.forensics-entry h2 { font-size:13px;font-weight:620; }
+.forensics-entry p { margin-top:3px;color:#7d8798;font-size:11px;line-height:1.55; }
+.secondary-button,.forensics-back {
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #d9dbe5;border-radius:8px;background:#fff;color:#39445a;font-size:11px;font-weight:620;white-space:nowrap;
+}
+.secondary-button { min-height:38px;padding:8px 11px; }
+.secondary-button:hover:enabled,.forensics-back:hover { border-color:#bdb9ed;background:#f5f3ff;color:#5148bd; }
+.forensics-progress .progress-icon { color:#d3b160;background:#f8f1dd; }
+.forensics-progress .eyebrow { display:block;margin-bottom:2px;font-size:8px; }
+.forensics-view { display:grid;gap:14px; }
+.forensics-back { width:max-content;padding:7px 9px; }
+.forensics-header { display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:6px 0 5px; }
+.forensics-header h2 { margin-top:6px;font-size:22px;letter-spacing:-.6px; }
+.forensics-verdict,.inference-label { display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid #e2ddc8;border-radius:999px;background:#fbf7e9;color:#8b7137;font-size:9px;font-weight:650;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap; }
+.forensics-summary,.forensics-section,.forensics-error .notice,.forensics-candidate,.forensics-empty {
+  border:1px solid #e1e4eb;border-radius:12px;background:rgba(255,255,255,.78);box-shadow:0 9px 28px rgba(31,38,70,.035);
+}
+.forensics-summary { display:flex;gap:15px;padding:20px; }
+.forensics-summary .claim p { margin-top:5px;color:#3e485a;font-size:16px;line-height:1.6; }
+.forensics-section { padding:18px; }
+.forensics-section-title { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px; }
+.forensics-section-title>div { display:flex;align-items:center;gap:10px; }
+.forensics-section-title h2 { margin-top:2px;font-size:14px; }
+.forensics-section-title>span:not(.inference-label) { color:#8c94a2;font-size:10px; }
+.forensics-candidate { padding:16px;box-shadow:none; }
+.forensics-candidate.primary { border-color:#d8d1ae;background:linear-gradient(135deg,#fffdf5,#fff); }
+.candidate-top { display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px; }
+.candidate-icon { width:34px;height:34px;display:grid;place-items:center;border-radius:9px;background:#eeedfb;color:#645bd5; }
+.candidate-top h3 { margin-top:2px;font-size:14px;line-height:1.35; }
+.confidence-badge { padding:5px 7px;border-radius:5px;font-size:9px;font-weight:750;text-transform:uppercase;letter-spacing:.65px; }
+.confidence-badge.high { color:#2f795c;background:#e9f5ef; }.confidence-badge.medium { color:#8d6d26;background:#f9f1dc; }.confidence-badge.low { color:#777f8e;background:#eef0f3; }
+.candidate-inference { display:flex;gap:8px;margin-top:14px;padding:11px;border-left:2px solid #d3b15f;background:rgba(226,194,118,.09);color:#876f3c; }
+.candidate-inference>div>span { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px; }
+.candidate-inference p { margin:3px 0 7px;color:#605b50;font-size:12px;line-height:1.6; }
+.candidate-signals { display:flex;flex-wrap:wrap;gap:5px;margin-top:12px; }
+.candidate-signals span { padding:3px 6px;border:1px solid #e2e4e9;border-radius:999px;color:#7d8592;font-size:8px;text-transform:uppercase;letter-spacing:.45px; }
+.candidate-files { display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px; }
+.candidate-files code { padding:4px 6px;border-radius:5px;background:#f4f5f8;color:#505a6d;font-size:9px;overflow-wrap:anywhere; }
+.candidate-actions { display:flex;flex-wrap:wrap;gap:12px;margin-top:13px; }
+.candidate-actions a { display:inline-flex;align-items:center;gap:5px;color:#5b54c8;font-size:10px;font-weight:620; }
+.candidate-actions a:hover { text-decoration:underline; }
+.candidate-list { display:grid;gap:9px; }
+.forensics-empty { display:flex;align-items:flex-start;gap:11px;padding:18px;color:#8d753b;background:#fcf9ef;border-color:#e8dfc2; }
+.forensics-empty h2 { font-size:14px; }.forensics-empty p { margin-top:4px;color:#817967;font-size:11px; }
+.forensics-timeline { list-style:none;padding:0; }
+.forensics-timeline li { position:relative;display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:12px;padding:0 0 17px 18px;border-left:1px solid #dedfe7; }
+.forensics-timeline li:last-child { padding-bottom:0;border-color:transparent; }
+.timeline-node { position:absolute;left:-5px;top:5px;width:9px;height:9px;border:2px solid #fff;border-radius:50%;background:#9a93d8;box-shadow:0 0 0 1px #bbb6e6; }
+.timeline-node.workflow { background:#d2a748;box-shadow:0 0 0 1px #e1c987; }.timeline-node.deployment { background:#4e9a77;box-shadow:0 0 0 1px #93c3ac; }.timeline-node.issue { background:#d06c71;box-shadow:0 0 0 1px #dfa2a5; }
+.forensics-timeline time { color:#7f8795;font-size:9px;line-height:1.5; }
+.forensics-timeline li>div { position:relative;min-width:0; }
+.forensics-timeline h3 { margin:2px 22px 0 0;font-size:11px;font-weight:620; }
+.forensics-timeline p { margin-top:2px;color:#8a919d;font-size:9px; }
+.forensics-timeline li>div>a { position:absolute;right:0;top:2px;color:#7371b9; }
+.timeline-type { color:#8a83cc;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.6px; }
+.timeline-status { align-self:start;padding:3px 5px;border-radius:4px;background:#f0f1f4;color:#737b88;font-size:8px;text-transform:uppercase; }
+.timeline-status.failure,.timeline-status.timed_out { color:#a1484e;background:#fae9ea; }.timeline-status.success { color:#34785d;background:#e9f4ee; }
+.forensics-evidence-grid { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+.facts-panel { border-top:2px solid #66a887; }.inference-panel { border-top:2px solid #d0aa50; }
+.forensics-claims { display:grid;gap:9px; }
+.forensics-claims .claim { padding:10px;border-radius:8px;background:#f7f8fa; }
+.forensics-claims .claim p { color:#555f70;font-size:11px;line-height:1.55; }
+.forensics-coverage { display:flex;flex-wrap:wrap;align-items:center;gap:7px 14px;padding:10px 2px;color:#8f97a5;font-size:9px; }
+.forensics-coverage details { width:100%; }.forensics-coverage summary { cursor:pointer; }.forensics-coverage ul { margin-top:6px; }
+.forensics-error { display:grid;gap:14px; }
+
+.is-overlay .forensics-entry,.is-overlay .forensics-summary,.is-overlay .forensics-section,.is-overlay .forensics-candidate,.is-overlay .forensics-empty {
+  border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.035);box-shadow:0 14px 40px rgba(0,0,0,.12);
+}
+.is-overlay .forensics-entry { background:linear-gradient(135deg,rgba(121,103,238,.09),rgba(255,255,255,.025)); }
+.is-overlay .forensics-entry-icon,.is-overlay .candidate-icon { border-color:rgba(139,124,255,.16);background:rgba(139,124,255,.09);color:#aaa1f3; }
+.is-overlay .secondary-button,.is-overlay .forensics-back { border-color:rgba(255,255,255,.12);background:rgba(255,255,255,.055);color:#d4d5dc; }
+.is-overlay .forensics-entry h2,.is-overlay .forensics-header h2,.is-overlay .forensics-section h2,.is-overlay .candidate-top h3,.is-overlay .forensics-empty h2 { color:#f1f0f6; }
+.is-overlay .forensics-entry p,.is-overlay .forensics-summary .claim p,.is-overlay .candidate-inference p,.is-overlay .forensics-claims .claim p,.is-overlay .forensics-empty p { color:#b6b8c2; }
+.is-overlay .forensics-candidate.primary { border-color:rgba(215,181,96,.2);background:linear-gradient(135deg,rgba(207,164,58,.07),rgba(255,255,255,.025)); }
+.is-overlay .candidate-inference { background:rgba(205,166,73,.07); }.is-overlay .candidate-files code,.is-overlay .forensics-claims .claim { background:rgba(255,255,255,.045);color:#bfc1ca; }
+.is-overlay .candidate-signals span { border-color:rgba(255,255,255,.09);color:#9295a0; }.is-overlay .forensics-timeline li { border-color:rgba(255,255,255,.1); }.is-overlay .timeline-node { border-color:#111218; }
+.is-overlay .forensics-timeline h3 { color:#dadbe1; }.is-overlay .forensics-timeline p,.is-overlay .forensics-timeline time,.is-overlay .forensics-coverage { color:#8e919d; }
+
+@media(max-width:700px) {
+  .forensics-entry,.forensics-header { align-items:stretch;flex-direction:column; }
+  .forensics-entry .secondary-button { width:100%; }
+  .forensics-verdict { align-self:flex-start; }
+  .forensics-evidence-grid { grid-template-columns:1fr; }
+  .forensics-timeline li { grid-template-columns:60px minmax(0,1fr); }
+  .timeline-status { grid-column:2;justify-self:start; }
+}
+
 /* Compact surface rendered inside the extension's floating GitHub overlay. */
 html.overlay-document,
 html.overlay-document body {

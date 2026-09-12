@@ -53,7 +53,9 @@ describe("local execution boundary", () => {
       let status = launcher.get(runId);
       const deadline = Date.now() + 12_000;
       while (status.status !== "running" && status.status !== "error" && Date.now() < deadline) { await delay(100); status = launcher.get(runId); }
-      while (!status.lines.some(line => line.includes("SECRET=")) && status.status === "running" && Date.now() < deadline) { await delay(100); status = launcher.get(runId); }
+      // npm echoes the script itself, which also contains the word SECRET. Wait
+      // for the fixture's exact output instead of treating that command echo as success.
+      while (!status.lines.includes("SECRET=missing") && status.status === "running" && Date.now() < deadline) { await delay(100); status = launcher.get(runId); }
       expect(status.status).toBe("running");
       expect(status.url).toBe("http://127.0.0.1:45678/");
       expect(status.lines).toContain("SECRET=missing");

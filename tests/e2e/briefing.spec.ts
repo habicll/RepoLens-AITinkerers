@@ -13,6 +13,7 @@ test("real CopilotKit transport renders evidence and gates the solution", async 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Understand before/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Propose a solution/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Investigate issue" })).toHaveCount(0);
   await understand(page);
   await expect(page.getByRole("heading", { name: "The problem", exact: true })).toBeVisible();
   await expect(page.getByText("The OAuth callback succeeds, but the session is rejected immediately after sign-in.")).toBeVisible();
@@ -24,6 +25,15 @@ test("real CopilotKit transport renders evidence and gates the solution", async 
   await expect(page.getByRole("dialog").getByText(/I verified the callback URL/)).toBeVisible();
   await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("href", `${issue}#issuecomment-21`);
   await page.getByRole("button", { name: "Close source" }).click();
+  await page.getByRole("button", { name: "Investigate issue" }).click();
+  await expect(page.getByRole("heading", { name: "Likely regression detected" })).toBeVisible();
+  await expect(page.getByText("PULL REQUEST #461", { exact: true })).toBeVisible();
+  await expect(page.getByText("Authentication workflow failed", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Facts", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Inferences", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open PR #461", exact: true })).toHaveAttribute("href", "https://github.com/test-owner/test-repo/pull/461");
+  await page.getByRole("button", { name: "Back to overview" }).click();
+  await expect(page.getByRole("heading", { name: "The problem", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Propose a solution/ }).click();
   await expect(page.getByRole("heading", { name: "Proposed solution", exact: true })).toBeVisible();
   await expect(page.getByText("Normalize the OAuth identity before session validation.")).toBeVisible();
@@ -74,6 +84,8 @@ test("narrow layout is usable without horizontal overflow", async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 });
   await understand(page);
   await expect(page.getByRole("heading", { name: "The problem", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Investigate issue" }).click();
+  await expect(page.getByRole("heading", { name: "Likely regression detected" })).toBeVisible();
   const widths = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   expect(widths.scroll).toBeLessThanOrEqual(widths.client);
   await page.screenshot({ path: "test-results/briefing-panel.png", fullPage: true });

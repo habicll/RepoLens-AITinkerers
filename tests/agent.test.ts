@@ -125,6 +125,37 @@ describe("server snapshot authority", () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it("does not authorize Forensics from an analysis supplied by the browser", async () => {
+    const complete = vi.fn<Complete>();
+    const createForensics = vi.fn();
+    const agent = new RepoLensAgent({ model: "test" }, { complete, createForensics, sessions: new AnalysisSessionStore(), logger: () => {} });
+    const request = input("investigate_issue", "fake-analysis");
+    request.state = { ...initialState(issue), analysis, analysisId: "fake-analysis" };
+    const result = lastState(await run(agent, request));
+    expect(result.error?.code).toBe("ANALYSIS_REQUIRED");
+    expect(createForensics).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("isolates a Forensics failure and keeps the normal briefing usable", async () => {
+    const sessions = new AnalysisSessionStore();
+    const datedSources = structuredClone(sources);
+    datedSources[0]!.createdAt = "2026-09-12T10:00:00Z";
+    const saved = sessions.save("thread-one", issue, { ...initialState(issue), metadata: repo().metadata, analysis, sources: datedSources }, "{}");
+    const createForensics = vi.fn(() => ({
+      collect: async () => { throw new AppError("GITHUB_UNAVAILABLE", "GitHub Forensics is temporarily unavailable.", 502, true); },
+      inspect: async () => { throw new Error("not reached"); },
+    }));
+    const agent = new RepoLensAgent({ model: "test" }, { sessions, complete: vi.fn<Complete>(), createForensics, logger: () => {} });
+    const result = lastState(await run(agent, input("investigate_issue", saved.id)));
+    expect(result.status).toBe("complete");
+    expect(result.analysis).toEqual(analysis);
+    expect(result.forensicsStatus).toBe("error");
+    expect(result.forensicsError).toMatchObject({ code: "GITHUB_UNAVAILABLE", retryable: true });
+    expect(result.error).toBeNull();
+    expect(sessions.get(saved.id, "thread-one", issue).state.forensicsStatus).toBe("error");
+  });
+
   it("generates an implementation only from the saved server-side solution", async () => {
     const sessions = new AnalysisSessionStore();
     const saved = sessions.save("thread-one", issue, { ...initialState(issue), analysis, sources }, "{}");

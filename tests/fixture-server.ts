@@ -4,7 +4,7 @@ import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import { Observable } from "rxjs";
 import { createApp } from "../server/index.js";
 import { parseIssueUrl, parseRepositoryUrl } from "../shared/contracts.js";
-import { fixtureRepositoryState, fixtureState } from "./fixture-data.js";
+import { fixtureForensics, fixtureRepositoryState, fixtureState } from "./fixture-data.js";
 
 class FixtureAgent extends AbstractAgent {
   constructor() { super({ agentId: "repolens", description: "Automated test fixture" }); }
@@ -30,6 +30,8 @@ class FixtureAgent extends AbstractAgent {
       const state = fixtureState(issue, input.runId);
       if (props.intent === "understand") {
         observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: { ...state, analysis: null, analysisId: null, status: "loading", phase: "Reading GitHub comments" } });
+      } else if (props.intent === "investigate_issue") {
+        observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: { ...state, status: "loading", forensicsStatus: "loading", forensicsPhase: "Reading the issue timeline and recent changes", forensicsActivities: [{ id: "timeline", label: "Reading the issue timeline and recent changes", status: "running" }] } });
       }
       const timer = setTimeout(() => {
         if (issue.number === 403) {
@@ -37,6 +39,8 @@ class FixtureAgent extends AbstractAgent {
           state.analysis = null;
           state.analysisId = null;
           state.error = { code: "PERMISSION_DENIED", message: "This repository is private or unavailable.", retryable: false };
+        } else if (props.intent === "investigate_issue") {
+          fixtureForensics(state);
         } else if (props.intent === "propose_solution" || props.intent === "implement_solution") {
           state.solution = {
             status: "proposed", approach: { text: "Normalize the OAuth identity before session validation.", sourceIds: ["file-1", "file-2"] }, assumptions: ["Both readers must share the same identity field."],

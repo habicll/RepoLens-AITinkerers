@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { CopilotKitProvider, useAgent, useAgentContext, useCopilotKit } from "@copilotkit/react-core/v2";
-import { AlertCircle, ArrowRight, ArrowUpRight, BookOpen, Check, CircleDot, FileCode2, Focus, Github, GitBranch, Link2, LoaderCircle, MessageSquare, RefreshCw, Search, ShieldCheck, Sparkles, Square } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, CircleDot, FileCode2, Focus, Github, GitBranch, Link2, LoaderCircle, MessageSquare, Microscope, RefreshCw, Search, ShieldCheck, Sparkles, Square } from "lucide-react";
 import { initialRepositoryState, initialState, issueKey, parseIssueUrl, parseRepositoryUrl, repositoryKey, type HealthInfo, type IssueRef, type RepositoryRef, type RepoLensState } from "../shared/contracts";
 import { AnalysisView, CoverageFooter, ImplementationView, SolutionView } from "./components/AnalysisView";
 import { LocalLaunchControl, RepositoryView } from "./components/RepositoryView";
+import { ForensicsView } from "./components/ForensicsView";
 
 export const API_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:3001").replace(/\/$/, "");
-type Intent = "understand" | "propose_solution" | "implement_solution";
+type Intent = "understand" | "propose_solution" | "implement_solution" | "investigate_issue";
 type HealthState = { kind: "checking" } | { kind: "ready"; data: HealthInfo } | { kind: "offline" };
 const isExtension = typeof chrome !== "undefined" && !!chrome.runtime?.id;
 const isOverlay = isExtension && new URLSearchParams(window.location.search).get("surface") === "overlay";
@@ -125,6 +126,7 @@ function AgentSession({ issue, requestToken, threadId, onBusy }: { issue: IssueR
   const [localError, setLocalError] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [completed, setCompleted] = useState<RepoLensState | null>(null);
+  const [view, setView] = useState<"overview" | "forensics">("overview");
   const activeRun = useRef<string | null>(null);
   const lastRequest = useRef<string | null>(null);
   const mounted = useRef(true);
@@ -163,7 +165,7 @@ function AgentSession({ issue, requestToken, threadId, onBusy }: { issue: IssueR
     if (intent !== "understand" && !analysisId) return;
     const runId = crypto.randomUUID();
     activeRun.current = runId; setWorking(intent); setLastIntent(intent); setStopped(false); setLocalError(null);
-    if (intent === "understand") setCompleted(null);
+    if (intent === "understand") { setCompleted(null); setView("overview"); }
     try {
       await copilotkit.runAgent({ agent, runId, forwardedProps: { intent, issue, ...(intent !== "understand" ? { analysisId } : {}) } });
     } catch (error) {
@@ -180,16 +182,26 @@ function AgentSession({ issue, requestToken, threadId, onBusy }: { issue: IssueR
   }, [requestToken, isReady, working, run]);
 
   const stop = () => { activeRun.current = null; copilotkit.stopAgent({ agent }); setWorking(null); setStopped(true); };
+  const openForensics = () => {
+    setView("forensics");
+    setLocalError(null);
+    if (!displayed?.forensics || displayed.forensicsStatus === "error" || displayed.forensicsStatus === "permission_denied") void run("investigate_issue");
+  };
+  const forensicsBusy = working === "investigate_issue";
+  const forensicsFailed = displayed?.forensicsStatus === "error" || displayed?.forensicsStatus === "permission_denied";
 
   return <div className="workspace">
-    {(busy || waiting) && <section className="progress-card" role="status" aria-live="polite"><div className="progress-top"><span className="progress-icon"><Search size={18} /></span><div><h2>{waiting ? "Connecting to your agent" : working === "implement_solution" ? "Drafting the code changes" : working === "propose_solution" ? "Working out the next steps" : "Following the evidence"}</h2><p>{current.phase || (waiting ? "Preparing the investigation…" : "Reading the issue and gathering useful context…")}</p></div>{busy && <button className="quiet-button" onClick={stop}><Square size={11} fill="currentColor" /> Stop</button>}</div>{current.activities.length > 0 && <ul className="activity-list">{current.activities.map((activity) => <li key={activity.id} className={activity.status}>{activity.status === "running" ? <LoaderCircle size={13} className="spin" /> : activity.status === "done" ? <Check size={13} /> : <AlertCircle size={13} />}<span>{activity.label}</span></li>)}</ul>}<div className="progress-track"><span /></div></section>}
+    {(busy || waiting) && !forensicsBusy && <section className="progress-card" role="status" aria-live="polite"><div className="progress-top"><span className="progress-icon"><Search size={18} /></span><div><h2>{waiting ? "Connecting to your agent" : working === "implement_solution" ? "Drafting the code changes" : working === "propose_solution" ? "Working out the next steps" : "Following the evidence"}</h2><p>{current.phase || (waiting ? "Preparing the investigation…" : "Reading the issue and gathering useful context…")}</p></div>{busy && <button className="quiet-button" onClick={stop}><Square size={11} fill="currentColor" /> Stop</button>}</div>{current.activities.length > 0 && <ul className="activity-list">{current.activities.map((activity) => <li key={activity.id} className={activity.status}>{activity.status === "running" ? <LoaderCircle size={13} className="spin" /> : activity.status === "done" ? <Check size={13} /> : <AlertCircle size={13} />}<span>{activity.label}</span></li>)}</ul>}<div className="progress-track"><span /></div></section>}
+    {view === "forensics" && forensicsBusy && <section className="progress-card forensics-progress" role="status" aria-live="polite"><div className="progress-top"><span className="progress-icon"><Microscope size={18} /></span><div><span className="eyebrow">ISSUE FORENSICS</span><h2>Investigating issue…</h2><p>{current.forensicsPhase || "Preparing the evidence window…"}</p></div><button className="quiet-button" onClick={stop}><Square size={11} fill="currentColor" /> Stop</button></div>{current.forensicsActivities.length > 0 && <ul className="activity-list">{current.forensicsActivities.map(activity => <li key={activity.id} className={activity.status}>{activity.status === "running" ? <LoaderCircle size={13} className="spin" /> : activity.status === "done" ? <Check size={13} /> : <AlertCircle size={13} />}<span>{activity.label}</span></li>)}</ul>}<div className="progress-track"><span /></div></section>}
     {stopped && <div className="connection-note"><Square size={12} /> Investigation stopped. You can start again when you are ready.</div>}
-    {(localError || failed) && <Notice title={current.status === "permission_denied" ? "This issue is not accessible" : lastIntent === "implement_solution" ? "The implementation draft could not be completed" : lastIntent === "propose_solution" ? "The solution could not be completed" : "The investigation could not be completed"} description={current.error?.message || localError || "Please try again."} />}
+    {view === "overview" && (localError || failed) && <Notice title={current.status === "permission_denied" ? "This issue is not accessible" : lastIntent === "implement_solution" ? "The implementation draft could not be completed" : lastIntent === "propose_solution" ? "The solution could not be completed" : "The investigation could not be completed"} description={current.error?.message || localError || "Please try again."} />}
+    {view === "forensics" && !forensicsBusy && (localError || forensicsFailed) && <section className="forensics-error"><button type="button" className="forensics-back" onClick={() => { setView("overview"); setLocalError(null); }}><ArrowLeft size={15} />Back to overview</button><Notice title={displayed?.forensicsStatus === "permission_denied" ? "Forensics needs additional GitHub access" : "Forensics could not be completed"} description={displayed?.forensicsError?.message || localError || "The normal IssueLens analysis is still available."} action="Retry investigation" onAction={() => void run("investigate_issue")} /></section>}
     {matched && current.status === "empty" && !displayed?.analysis && <Notice title="There is not enough context yet" description={current.error?.message || "No usable analysis could be produced from the available sources."} />}
-    {displayed?.analysis && <>
+    {view === "overview" && displayed?.analysis && <>
       <div className="briefing-heading"><div><span className="eyebrow">ISSUE BRIEFING</span><h2>{displayed.metadata?.title || `Issue #${issue.number}`}</h2><a className="issue-reference" href={issue.url} target="_blank" rel="noreferrer noopener"><CircleDot size={14} /><span>{issue.owner}/{issue.repo} <strong>#{issue.number}</strong></span><ArrowUpRight size={13} /></a></div>{displayed.metadata?.state && <span className={`issue-state ${displayed.metadata.state}`}>{displayed.metadata.state}</span>}</div>
       {displayed.metadata && displayed.metadata.labels.length > 0 && <div className="issue-labels">{displayed.metadata.labels.slice(0, 5).map((label) => <span key={label}>{label}</span>)}</div>}
       <AnalysisView analysis={displayed.analysis} sources={displayed.sources} />
+      <section className="forensics-entry"><div><span className="forensics-entry-icon"><Microscope size={20} /></span><div><h2>Need to understand what caused this issue?</h2><p>Reconstruct recent changes, CI signals, deployments, and the evidence around likely regressions.</p></div></div><button type="button" className="secondary-button" onClick={openForensics} disabled={busy || !isReady}><Microscope size={15} />Investigate issue<ArrowRight size={14} /></button></section>
       {displayed.solution ? <>
         <SolutionView solution={displayed.solution} sources={displayed.sources} />
         {displayed.implementation ? <ImplementationView implementation={displayed.implementation} sources={displayed.sources} issue={issue} /> : displayed.solution.status === "proposed" && displayed.solution.steps.length > 0 ?
@@ -197,6 +209,7 @@ function AgentSession({ issue, requestToken, threadId, onBusy }: { issue: IssueR
       </> : <section className="next-step"><div><span className="next-step-icon"><GitBranch size={20} /></span><div><h2>Context first. A plan when you are ready.</h2><p>Turn these findings into an approach and concrete next steps.</p></div></div><button type="button" className="primary-button" onClick={() => void run("propose_solution")} disabled={busy || !isReady}>{working === "propose_solution" ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}Propose a solution<ArrowRight size={15} /></button></section>}
       <CoverageFooter coverage={displayed.coverage} snapshot={displayed.snapshot} />
     </>}
+    {view === "forensics" && !forensicsBusy && !localError && !forensicsFailed && displayed?.forensics && <ForensicsView result={displayed.forensics} sources={displayed.sources} onBack={() => setView("overview")} />}
     {!displayed?.analysis && !busy && !waiting && !localError && !failed && !stopped && current.status !== "empty" && <section className="ready-card"><span className="ready-icon"><CircleDot size={25} /></span><h2>Your issue. A clearer starting point.</h2><p>Click Understand to follow the discussion, explore relevant code, and see what is already known.</p><a href={issue.url} target="_blank" rel="noreferrer noopener" className="text-link">{issue.owner}/{issue.repo} #{issue.number}<ArrowUpRight size={14} /></a></section>}
   </div>;
 }

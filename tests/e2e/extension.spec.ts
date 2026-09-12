@@ -82,6 +82,10 @@ test("packaged MV3 extension keeps CopilotKit results scoped to the current repo
     await expect(panel.getByRole("dialog").getByText(/I verified the callback URL/)).toBeVisible();
     await expect(panel.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("href", `${firstIssue}#issuecomment-21`);
     await panel.getByRole("button", { name: "Close source" }).click();
+    await panel.getByRole("button", { name: "Investigate issue" }).click();
+    await expect(panel.getByRole("heading", { name: "Likely regression detected" })).toBeVisible();
+    await expect(panel.getByRole("link", { name: "Open PR #461", exact: true })).toHaveAttribute("href", "https://github.com/test-owner/test-repo/pull/461");
+    await panel.getByRole("button", { name: "Back to overview" }).click();
     await panel.getByRole("button", { name: /Propose a solution/ }).click();
     await expect(panel.getByRole("heading", { name: "Proposed solution", exact: true })).toBeVisible();
     await expect(panel.getByRole("heading", { name: "Review the proposed patch" })).toHaveCount(0);
@@ -127,14 +131,14 @@ test("packaged MV3 extension keeps CopilotKit results scoped to the current repo
     await github.screenshot({ path: testInfo.outputPath("extension-repository.png"), fullPage: false });
 
     expect(runs.map(run => [run.forwardedProps.intent, run.forwardedProps.issue?.url || run.forwardedProps.repository?.url])).toEqual([
-      ["understand", firstIssue], ["propose_solution", firstIssue], ["implement_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue], ["understand_repository", repositoryRoot],
+      ["understand", firstIssue], ["investigate_issue", firstIssue], ["propose_solution", firstIssue], ["implement_solution", firstIssue], ["understand", slowIssue], ["understand", nextIssue], ["understand_repository", repositoryRoot],
     ]);
     for (const run of runs) {
       const currentContext = run.context?.find(item => item.description === (run.forwardedProps.issue ? "Current GitHub issue" : "Current GitHub repository"));
       expect(currentContext).toBeDefined();
       expect(JSON.parse(currentContext!.value).url).toBe(run.forwardedProps.issue?.url || run.forwardedProps.repository?.url);
     }
-    expect(runs[0].threadId).not.toBe(runs[5].threadId);
+    expect(runs[0].threadId).not.toBe(runs[6].threadId);
     expect(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.url)).toBe(repositoryRoot);
     expect(await panel.locator("html").evaluate(() => (window as Window & { __extensionCspViolations?: string[] }).__extensionCspViolations ?? [])).toEqual([]);
     expect(cspErrors).toEqual([]);
