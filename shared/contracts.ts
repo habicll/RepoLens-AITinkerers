@@ -113,6 +113,60 @@ export const ImplementationDraftSchema = z.object({
 });
 export type ImplementationDraft = z.infer<typeof ImplementationDraftSchema>;
 
+export const ForensicsTimelineEventSchema = z.object({
+  id: z.string().min(1).max(160),
+  timestamp: z.string().datetime(),
+  type: z.enum(["issue", "pull_request", "commit", "workflow", "deployment"]),
+  title: z.string().min(1).max(300),
+  description: z.string().min(1).max(600).nullable(),
+  status: z.string().max(80).nullable(),
+  url: z.string().url(),
+  sourceIds: z.array(z.string()).min(1).max(4),
+});
+export type ForensicsTimelineEvent = z.infer<typeof ForensicsTimelineEventSchema>;
+
+export const RegressionCandidateSchema = z.object({
+  id: z.string().min(1).max(160),
+  type: z.enum(["pull_request", "commit"]),
+  title: z.string().min(1).max(300),
+  url: z.string().url(),
+  sha: z.string().regex(/^[a-f0-9]{40,64}$/i),
+  number: z.number().int().positive().nullable(),
+  timestamp: z.string().datetime(),
+  confidence: z.enum(["high", "medium", "low"]),
+  facts: z.array(ClaimSchema).min(1).max(6),
+  inference: ClaimSchema.nullable(),
+  changedFiles: z.array(z.string().min(1).max(500)).max(12),
+  signals: z.array(z.enum(["temporal", "path", "message", "ci", "deployment", "timeline", "semantic"])).max(7),
+});
+export type RegressionCandidate = z.infer<typeof RegressionCandidateSchema>;
+
+export const ForensicsCoverageSchema = z.object({
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+  windowDays: z.number().int().min(1).max(30),
+  timelineEventsRead: z.number().int().nonnegative(),
+  commitsConsidered: z.number().int().nonnegative(),
+  commitsInspected: z.number().int().nonnegative(),
+  pullRequestsFound: z.number().int().nonnegative(),
+  actions: z.enum(["available", "unavailable", "permission_denied"]),
+  deployments: z.enum(["available", "unavailable", "permission_denied"]),
+  limits: z.array(z.string().min(1).max(500)).max(10),
+});
+export type ForensicsCoverage = z.infer<typeof ForensicsCoverageSchema>;
+
+export const ForensicsResultSchema = z.object({
+  status: z.enum(["likely_regression", "possible_candidates", "no_strong_evidence"]),
+  summary: ClaimSchema,
+  mostLikelyCandidateId: z.string().min(1).max(160).nullable(),
+  timeline: z.array(ForensicsTimelineEventSchema).max(30),
+  candidates: z.array(RegressionCandidateSchema).max(3),
+  facts: z.array(ClaimSchema).max(10),
+  inferences: z.array(ClaimSchema).max(5),
+  coverage: ForensicsCoverageSchema,
+});
+export type ForensicsResult = z.infer<typeof ForensicsResultSchema>;
+
 export const RepositoryAnalysisSchema = z.object({
   summary: ClaimSchema,
   whatItDoes: ClaimSchema,
@@ -152,7 +206,7 @@ export type LocalLaunchStatus = z.infer<typeof LocalLaunchStatusSchema>;
 
 export interface Source {
   id: string;
-  kind: "issue" | "comment" | "repository" | "file" | "readme";
+  kind: "issue" | "comment" | "repository" | "file" | "readme" | "timeline" | "pull_request" | "commit" | "workflow" | "deployment";
   url: string;
   label: string;
   excerpt: string;
@@ -212,6 +266,11 @@ export interface RepoLensState {
   analysis: Analysis | null;
   solution: Solution | null;
   implementation: ImplementationDraft | null;
+  forensicsStatus: "idle" | "loading" | "complete" | "error" | "permission_denied" | "empty";
+  forensicsPhase: string;
+  forensicsActivities: Activity[];
+  forensics: ForensicsResult | null;
+  forensicsError: AgentError | null;
   repositoryAnalysisId: string | null;
   repositoryAnalysis: RepositoryAnalysis | null;
   launchProposal: LocalLaunchProposal | null;
@@ -222,6 +281,7 @@ export function initialState(issue: IssueRef | null = null): RepoLensState {
     issue, repository: null, metadata: null, repositoryMetadata: null, runId: null, status: "idle", phase: "", activities: [], sources: [],
     coverage: { commentsTotal: 0, commentsRead: 0, commentsTruncated: false, filesRead: 0, pathsDiscovered: 0, treeTruncated: false, codeSearch: "not_used", limits: [] },
     snapshot: null, analysisId: null, analysis: null, solution: null, implementation: null,
+    forensicsStatus: "idle", forensicsPhase: "", forensicsActivities: [], forensics: null, forensicsError: null,
     repositoryAnalysisId: null, repositoryAnalysis: null, launchProposal: null, error: null,
   };
 }

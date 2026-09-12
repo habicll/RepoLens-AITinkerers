@@ -24,6 +24,7 @@ export interface ServerConfig {
   runLimitPerMinute?: number;
   localExecutionEnabled?: boolean;
   workspaceRoot?: string;
+  forensicsWindowDays?: number;
 }
 
 export function readConfig(): ServerConfig {
@@ -32,6 +33,8 @@ export function readConfig(): ServerConfig {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be a valid TCP port.");
   if (!["127.0.0.1", "localhost", "::1"].includes(host)) throw new Error("This MVP only supports a local backend. Use HOST=127.0.0.1.");
   if (process.env.EXTENSION_ID && !/^[a-p]{32}$/.test(process.env.EXTENSION_ID)) throw new Error("EXTENSION_ID must be a Chrome extension ID.");
+  const forensicsWindowDays = Number(process.env.FORENSICS_WINDOW_DAYS || 7);
+  if (!Number.isInteger(forensicsWindowDays) || forensicsWindowDays < 1 || forensicsWindowDays > 30) throw new Error("FORENSICS_WINDOW_DAYS must be an integer between 1 and 30.");
   return {
     port, host,
     openaiApiKey: process.env.OPENAI_API_KEY?.trim() || undefined,
@@ -41,6 +44,7 @@ export function readConfig(): ServerConfig {
     extensionId: process.env.EXTENSION_ID || undefined,
     localExecutionEnabled: process.env.ENABLE_LOCAL_EXECUTION?.trim().toLowerCase() === "true",
     workspaceRoot: process.env.REPOLENS_WORKSPACE_ROOT?.trim() || undefined,
+    forensicsWindowDays,
   };
 }
 

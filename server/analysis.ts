@@ -4,7 +4,7 @@ import type { FunctionTool, Response, ResponseCreateParamsNonStreaming, Response
 import { z } from "zod";
 import { AnalysisSchema, ClaimSchema, ImplementationDraftSchema, RepositoryAnalysisSchema, SolutionSchema, type Analysis, type ImplementationDraft, type RepositoryAnalysis, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
-import { ANALYSIS_PROMPT, IMPLEMENTATION_PROMPT, INVESTIGATION_PROMPT, REPOSITORY_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
+import { ANALYSIS_PROMPT, FORENSICS_PROMPT, IMPLEMENTATION_PROMPT, INVESTIGATION_PROMPT, REPOSITORY_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
 
 export interface RepositoryReader {
   metadata: IssueMetadata | null;
@@ -23,6 +23,18 @@ export interface UsageCounts { modelCalls: number; toolCalls: number; inputToken
 export const MAX_MODEL_CALLS = 6;
 export const MAX_TOOL_CALLS = 10;
 const MAX_EVIDENCE_CHARS = 80_000;
+
+export const ForensicsReasoningSchema = z.object({
+  summary: ClaimSchema,
+  assessments: z.array(z.object({
+    candidateId: z.string().min(1).max(160),
+    semanticRelevance: z.enum(["high", "medium", "low"]),
+    inference: z.string().min(1).max(600),
+    sourceIds: z.array(z.string()).min(1).max(6),
+  })).max(6),
+  inferences: z.array(ClaimSchema).max(4),
+});
+export type ForensicsReasoning = z.infer<typeof ForensicsReasoningSchema>;
 const reasoningForModel = (model: string): ResponseCreateParamsNonStreaming["reasoning"] =>
   /^gpt-5(?:[.-]|$)/.test(model) && !/(?:pro|chat|codex)/.test(model) ? { effort: "low" } : undefined;
 
@@ -57,7 +69,7 @@ export const REPOSITORY_TOOLS: FunctionTool[] = [
     parameters: { type: "object", properties: { path: { type: "string" }, startLine: { type: ["integer", "null"] }, endLine: { type: ["integer", "null"] } }, required: ["path", "startLine", "endLine"], additionalProperties: false } },
 ];
 
-export function validateEvidence(result: Analysis | Solution | ImplementationDraft | RepositoryAnalysis, sources: Source[]): void {
+export function validateEvidence(result: Analysis | Solution | ImplementationDraft | RepositoryAnalysis | ForensicsReasoning, sources: Source[]): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   const visit = (value: unknown): void => {
     if (typeof value === "string" && sources.some(source => value.includes(source.id))) {
@@ -130,7 +142,7 @@ function account(response: ModelResponse, counts: UsageCounts): void {
   counts.outputTokens += response.usage?.output_tokens ?? 0;
 }
 
-async function finalResult<T extends Analysis | Solution | ImplementationDraft | RepositoryAnalysis>(options: {
+async function finalResult<T extends Analysis | Solution | ImplementationDraft | RepositoryAnalysis | ForensicsReasoning>(options: {
   schema: z.ZodType<T>; name: string; instructions: string; evidence: string;
   model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts; sources: Source[]; maxOutputTokens?: number;
 }): Promise<T> {
@@ -158,6 +170,13 @@ export async function understandRepository(options: {
   evidence: string; sources: Source[]; model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts;
 }): Promise<RepositoryAnalysis> {
   return finalResult({ ...options, schema: RepositoryAnalysisSchema, name: "repository_briefing", instructions: REPOSITORY_PROMPT, evidence: options.evidence, maxOutputTokens: 4_500 });
+}
+
+export async function reasonForensics(options: {
+  evidence: string; sources: Source[]; model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts;
+}): Promise<ForensicsReasoning> {
+  return finalResult({ ...options, schema: ForensicsReasoningSchema, name: "issue_forensics_reasoning", instructions: FORENSICS_PROMPT,
+    evidence: options.evidence, maxOutputTokens: 3_000 });
 }
 
 export async function understand(options: {

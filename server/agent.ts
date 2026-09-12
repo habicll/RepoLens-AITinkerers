@@ -6,6 +6,8 @@ import { initialRepositoryState, initialState, IssueRefSchema, issueKey, parseIs
 import { AppError } from "./errors.js";
 import { GitHubRepository } from "./github.js";
 import { implementSolution, openAICompletion, proposeSolution, understand, understandRepository, type Complete, type RepositoryReader, type UsageCounts } from "./analysis.js";
+import { investigateIssue, type ForensicsReader } from "./forensics.js";
+import { GitHubForensicsRepository } from "./forensics-github.js";
 import { GitHubProject, type ProjectReader } from "./project.js";
 import { AnalysisSessionStore, analysisSessions, RepositorySessionStore, repositorySessions } from "./session.js";
 
@@ -15,18 +17,20 @@ export interface RepoLensAgentConfig {
   githubToken?: string;
   allowedRepos?: string[];
   localExecutionEnabled?: boolean;
+  forensicsWindowDays?: number;
 }
 export interface RepoLensAgentDependencies {
   complete?: Complete;
   createRepository?: (issue: IssueRef, signal: AbortSignal, report: (label: string) => void) => RepositoryReader;
   createProject?: (repository: RepositoryRef, signal: AbortSignal, report: (label: string) => void) => ProjectReader;
+  createForensics?: (issue: IssueRef, signal: AbortSignal) => ForensicsReader;
   sessions?: AnalysisSessionStore;
   repositorySessions?: RepositorySessionStore;
   timeoutMs?: number;
   logger?: (counts: UsageCounts & { durationMs: number; intent: string; success: boolean; errorCode?: string; errorStatus?: number; requestId?: string }) => void;
 }
 const CommandSchema = z.discriminatedUnion("intent", [
-  z.object({ intent: z.enum(["understand", "propose_solution", "implement_solution"]), issue: IssueRefSchema, analysisId: z.string().min(1).max(120).optional() }).strict(),
+  z.object({ intent: z.enum(["understand", "propose_solution", "implement_solution", "investigate_issue"]), issue: IssueRefSchema, analysisId: z.string().min(1).max(120).optional() }).strict(),
   z.object({ intent: z.literal("understand_repository"), repository: RepositoryRefSchema }).strict(),
 ]);
 
@@ -74,6 +78,7 @@ export class RepoLensAgent extends AbstractAgent {
       let state: RepoLensState = { ...initialState(), runId: input.runId, status: "loading" };
       let repository: RepositoryReader | null = null;
       let project: ProjectReader | null = null;
+      let activeAnalysisSession: { id: string; issue: IssueRef; store: AnalysisSessionStore } | null = null;
       const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
       const publish = () => {
         if (repository) state = { ...state, metadata: repository.metadata, snapshot: repository.snapshot, sources: [...repository.sources], coverage: structuredClone(repository.coverage) };
@@ -81,9 +86,15 @@ export class RepoLensAgent extends AbstractAgent {
         if (!observer.closed) observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: structuredClone(state) });
       };
       const report = (label: string) => {
-        state.phase = label;
-        state.activities = [...state.activities.map(activity => ({ ...activity, status: "done" as const })),
-          { id: `${input.runId}:${activitySequence++}`, label, status: "running" as const }].slice(-18);
+        if (intent === "investigate_issue") {
+          state.forensicsPhase = label;
+          state.forensicsActivities = [...state.forensicsActivities.map(activity => ({ ...activity, status: "done" as const })),
+            { id: `${input.runId}:forensics:${activitySequence++}`, label, status: "running" as const }].slice(-12);
+        } else {
+          state.phase = label;
+          state.activities = [...state.activities.map(activity => ({ ...activity, status: "done" as const })),
+            { id: `${input.runId}:${activitySequence++}`, label, status: "running" as const }].slice(-18);
+        }
         publish();
       };
       observer.next({ type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId });
@@ -143,14 +154,30 @@ export class RepoLensAgent extends AbstractAgent {
         }
         const sessions = this.dependencies.sessions ?? analysisSessions;
         const saved = command.intent !== "understand" ? sessions.get(command.analysisId, input.threadId, issue) : null;
-        if (saved) state = { ...saved.state, issue, runId: input.runId, status: "loading",
-          phase: command.intent === "implement_solution" ? "Preparing an implementation draft" : "Preparing the solution",
-          activities: [], ...(command.intent === "propose_solution" ? { solution: null, implementation: null } : { implementation: null }), error: null };
+        if (saved) {
+          activeAnalysisSession = { id: saved.id, issue, store: sessions };
+          state = { ...saved.state, issue, runId: input.runId, status: "loading",
+            phase: command.intent === "implement_solution" ? "Preparing an implementation draft" : command.intent === "propose_solution" ? "Preparing the solution" : saved.state.phase,
+            activities: command.intent === "investigate_issue" ? saved.state.activities : [],
+            ...(command.intent === "propose_solution" ? { solution: null, implementation: null } : command.intent === "implement_solution" ? { implementation: null } : {}),
+            ...(command.intent === "investigate_issue" ? { forensicsStatus: "loading" as const, forensicsPhase: "Preparing the investigation", forensicsActivities: [], forensics: null, forensicsError: null } : {}),
+            error: null };
+        }
         publish();
         if (!this.config.openaiApiKey && !this.dependencies.complete) throw new AppError("OPENAI_NOT_CONFIGURED", "Add OPENAI_API_KEY to the server environment, then retry Understand.", 503);
         const complete = this.dependencies.complete ?? openAICompletion(this.config.openaiApiKey!);
 
-        if (saved?.state.analysis && command.intent === "implement_solution") {
+        if (saved?.state.analysis && command.intent === "investigate_issue") {
+          const reader = this.dependencies.createForensics?.(issue, controller.signal) ?? new GitHubForensicsRepository(issue, {
+            token: this.config.githubToken, allowedRepos: this.config.allowedRepos,
+          }, controller.signal);
+          const investigation = await investigateIssue({ issue, metadata: saved.state.metadata, analysis: saved.state.analysis, sources: saved.state.sources,
+            reader, windowDays: this.config.forensicsWindowDays ?? 7, model: this.config.model, complete, signal: controller.signal, counts, report });
+          state.sources = investigation.sources;
+          state.forensics = investigation.result;
+          state.forensicsStatus = investigation.result.status === "no_strong_evidence" ? "empty" : "complete";
+          state.forensicsError = null;
+        } else if (saved?.state.analysis && command.intent === "implement_solution") {
           if (!saved.state.solution) throw new AppError("SOLUTION_REQUIRED", "Propose a solution before requesting an implementation.", 409);
           report("Drafting a reviewable patch from inspected code");
           state.implementation = await implementSolution({ analysis: saved.state.analysis, solution: saved.state.solution,
@@ -176,8 +203,11 @@ export class RepoLensAgent extends AbstractAgent {
         controller.signal.throwIfAborted();
         successful = true;
         state.status = "complete";
-        state.phase = intent === "understand" ? "Understanding complete" : intent === "propose_solution" ? "Solution proposed" : "Implementation draft ready";
-        state.activities = state.activities.map(activity => ({ ...activity, status: "done" }));
+        state.phase = intent === "understand" ? "Understanding complete" : intent === "propose_solution" ? "Solution proposed" : intent === "implement_solution" ? "Implementation draft ready" : state.phase;
+        if (intent === "investigate_issue") {
+          state.forensicsPhase = state.forensicsStatus === "empty" ? "Investigation complete · no strong evidence" : "Forensics investigation ready";
+          state.forensicsActivities = state.forensicsActivities.map(activity => ({ ...activity, status: "done" }));
+        } else state.activities = state.activities.map(activity => ({ ...activity, status: "done" }));
         state.error = null;
         if (saved) sessions.updateState(saved.id, input.threadId, issue, state);
         publish();
@@ -189,10 +219,20 @@ export class RepoLensAgent extends AbstractAgent {
         const safe = timedOut ? new AppError("RUN_TIMEOUT", "The analysis reached its 90-second limit. Please retry.", 504, true) : publicError(error);
         const requestId = error && typeof error === "object" && "requestID" in error && typeof error.requestID === "string" && /^[a-zA-Z0-9_-]{1,160}$/.test(error.requestID) ? error.requestID : undefined;
         errorMetrics = { errorCode: safe.code, errorStatus: safe.status, ...(requestId ? { requestId } : {}) };
-        state.status = safe.status === 403 ? "permission_denied" : "error";
-        state.phase = "Could not finish";
-        state.error = { code: safe.code, message: safe.message, retryable: safe.retryable };
-        state.activities = state.activities.map(activity => ({ ...activity, status: activity.status === "running" ? "error" : activity.status }));
+        if (intent === "investigate_issue" && state.analysis) {
+          state.status = "complete";
+          state.forensicsStatus = safe.status === 403 ? "permission_denied" : "error";
+          state.forensicsPhase = "Forensics could not finish";
+          state.forensicsError = { code: safe.code, message: safe.message, retryable: safe.retryable };
+          state.forensicsActivities = state.forensicsActivities.map(activity => ({ ...activity, status: activity.status === "running" ? "error" : activity.status }));
+          state.error = null;
+          if (activeAnalysisSession) activeAnalysisSession.store.updateState(activeAnalysisSession.id, input.threadId, activeAnalysisSession.issue, state);
+        } else {
+          state.status = safe.status === 403 ? "permission_denied" : "error";
+          state.phase = "Could not finish";
+          state.error = { code: safe.code, message: safe.message, retryable: safe.retryable };
+          state.activities = state.activities.map(activity => ({ ...activity, status: activity.status === "running" ? "error" : activity.status }));
+        }
         publish();
         observer.next({ type: EventType.RUN_ERROR, message: safe.message, code: safe.code });
         observer.complete();
