@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "RepoLens",
+  "version": "0.1.0",
+  "description": "Understand a GitHub issue, its discussion and the relevant code.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel"],
+  "host_permissions": ["https://github.com/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Open RepoLens" },
+  "side_panel": { "default_path": "index.html" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:3001"
+  }
+}

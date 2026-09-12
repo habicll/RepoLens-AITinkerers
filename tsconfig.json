@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node", "chrome", "vite/client"]
   },
-  "include": ["client", "server", "shared", "tests", "vite.config.ts", "playwright.config.ts"]
+  "include": ["client", "server", "shared", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }
