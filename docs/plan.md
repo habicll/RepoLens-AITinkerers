@@ -141,6 +141,8 @@ Après validation du parcours V2, l'intégration est passée du side panel Chrom
 
 Une troisième action explicite, Implement solution, a été ajoutée. Elle n'est disponible que pour une solution `proposed` possédant des étapes concrètes. Le serveur reprend l'analyse et la solution de sa session signée par un identifiant opaque, puis OpenAI produit un `ImplementationDraft` structuré. Le validateur refuse les fichiers non lus, créations, suppressions, renommages, binaires, traversées de chemin et diffs incomplets. Le résultat reste un brouillon à copier ou télécharger : aucun checkout, test, commit, push ou PR n'est exécuté.
 
+La racine `github.com/owner/repo` est désormais un second contexte. RepoLens récupère les métadonnées, le README, l'arbre racine et `package.json` au même commit, puis produit un briefing typé et sourcé. Pour les projets Node/npm possédant un script conventionnel, le serveur construit une recette déterministe. L'exécution reste désactivée par défaut ; une activation serveur et un consentement dans l'interface sont tous les deux nécessaires. Le projet reçoit un environnement minimal sans secrets du serveur, ses logs sont bornés et l'utilisateur peut arrêter son groupe de processus.
+
 ### Jalons et résultats vérifiables
 
 | Étape | Objectif et fichiers | Dépendances | Vérification |

@@ -28,11 +28,21 @@ La discussion GitHub peut évoluer. Faire une répétition proche de la présent
 6. **Demander la solution.** Cliquer Propose a solution. Aucun plan n'apparaît avant ce clic. Si le comportement attendu est encore contesté, montrer la question précise à résoudre plutôt qu'annoncer un correctif certain.
 7. **Implémenter quand c'est responsable.** Sur une issue dont la solution est concrète, cliquer Implement solution. Montrer le diff, ses fichiers sources et les actions Copy/Download. Répéter qu'il s'agit d'un brouillon non appliqué et non testé. Sur l'issue Express, l'absence de bouton est le bon comportement tant que le désaccord reste ouvert.
 
+## Parcours repository, environ 45 secondes
+
+1. Ouvrir la racine d'un vrai repository. RepoLens affiche automatiquement son nom sans copier l'URL.
+2. Cliquer **Understand**. Montrer le but du projet, son audience et les concepts qui rendent le README lisible.
+3. Ouvrir une source README : l'explication renvoie au texte réellement récupéré et au commit analysé.
+4. Montrer **Quick start from the README** puis la carte de lancement local. Les commandes viennent du manifest et restent visibles avant toute exécution.
+5. Pour une démo contrôlée uniquement, activer `ENABLE_LOCAL_EXECUTION=true`, utiliser un repository de confiance, cocher l'autorisation, lancer puis montrer les logs, l'URL locale et **Stop**.
+
+Ne lancez pas un repository tiers inconnu pendant la présentation. La compréhension du README fonctionne même lorsque l'exécution locale reste désactivée.
+
 Phrase de présentation : « RepoLens transforme une discussion GitHub dispersée en contexte d'ingénierie vérifiable, avant d'écrire le code. »
 
 ## Ce que CopilotKit apporte
 
-La fenêtre transmet l'issue courante par `useAgentContext`. Les trois actions pilotent un agent enregistré dans le runtime CopilotKit ; son état partagé alimente directement progression, sources, analyse, plan et patch. Un changement de page isole le thread et annule le travail précédent. L'expérience est contextuelle et structurée, sans fenêtre de chat générique.
+La fenêtre transmet le repository ou l'issue courante par `useAgentContext`. Les actions pilotent un agent enregistré dans le runtime CopilotKit ; son état partagé alimente directement progression, sources, briefing, analyse, plan et patch. Un changement de page isole le thread et annule le travail précédent. L'expérience est contextuelle et structurée, sans fenêtre de chat générique.
 
 ## Si une dépendance externe tombe
 
@@ -43,7 +53,7 @@ La fenêtre transmet l'issue courante par `useAgentContext`. Les trois actions p
 
 ## Vérification technique
 
-Vérification locale du 12 septembre 2026 : **43 tests unitaires et 6 tests navigateur réussis**, typecheck et build réussis. L'audit npm ne signalait aucune vulnérabilité. Le contrôle des secrets a vérifié sources, builds et historique Git ; `.env` n'est pas suivi.
+Vérification locale du 12 septembre 2026 : **58 tests unitaires et 7 tests navigateur réussis**, typecheck et build réussis. L'audit npm ne signalait aucune vulnérabilité. Le contrôle des secrets a vérifié sources, builds et historique Git ; `.env` n'est pas suivi.
 
 Le parcours complet dans le navigateur, avec le vrai runtime CopilotKit, GitHub et OpenAI `gpt-5.4`, a analysé l'issue Express en **21,4 secondes** puis produit la proposition sur clic en **4,7 secondes**. Il a récupéré les sept commentaires et trois fichiers, README compris, identifié `lib/view.js` et `lib/application.js`, et affiché le désaccord sur le comportement attendu avec ses sources. La proposition a correctement demandé de trancher ce comportement, sans présenter un plan de fix comme acquis. Aucune erreur navigateur n'a été détectée.
 
@@ -64,6 +74,7 @@ Pour vérifier directement GitHub et OpenAI en consommant des crédits API :
 
 ```bash
 npm run check:live -- https://github.com/expressjs/express/issues/7350 --solution
+npm run check:live -- https://github.com/expressjs/express
 ```
 
 Les résultats restent dans `local-results/`, hors Git. Les mesures dépendent du réseau, du quota et du modèle configuré ; aucun délai fixe de génération n'est promis.
