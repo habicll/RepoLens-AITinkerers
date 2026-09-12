@@ -95,7 +95,8 @@ La première collecte respecte les dépendances : issue et commentaires dépende
 | `Claim` | text, sourceIds | Au moins une référence récupérée |
 | `Analysis` | summary, facts, alreadyTried, relevantFiles, hypotheses, relevantContext, reproduction, howToRun, unknowns | Aucun champ de solution ; suggestions distinctes des tentatives rapportées |
 | `Solution` | status, approach, assumptions, steps, risks, openQuestions | `needs_more_information` implique un plan vide |
-| `RepoLensState` | issue, runId, status, phase, activities, sources, coverage, snapshot, analysisId, analysis, solution, error | Le client n'affiche que le run et l'issue attendus |
+| `ImplementationDraft` | status, summary, files, patch, validationCommands, notes | Un patch ne touche que des fichiers inspectés ; un statut bloqué ne contient aucun changement |
+| `RepoLensState` | issue, runId, status, phase, activities, sources, coverage, snapshot, analysisId, analysis, solution, implementation, error | Le client n'affiche que le run et l'issue attendus |
 
 Pas de modèle `Comment` distinct nécessaire : ses données utiles sont représentées par une `Source` de type `comment`. Pas de `RepositoryContext` universel : le snapshot, les chemins découverts et les sources suffisent.
 
@@ -130,9 +131,15 @@ La validation refuse les sources inexistantes et les chemins non lus. Elle contr
 
 ### Sécurité et démo
 
-Les secrets restent dans `.env`, serveur uniquement. L'extension possède `sidePanel` et l'accès aux domaines GitHub et au backend local. Aucun accès GitHub en écriture n'est nécessaire ; même avec un token plus permissif, le MVP refuse les repositories privés. L'utilisation est locale, sans comptes ni service multi-utilisateur exposé.
+Les secrets restent dans `.env`, serveur uniquement. L'extension injecte un bouton et un iframe isolé sur les pages d'issue GitHub ; elle accède au backend local et au presse-papiers uniquement après un clic explicite. Aucun accès GitHub en écriture n'est nécessaire ; même avec un token plus permissif, le MVP refuse les repositories privés. L'utilisation est locale, sans comptes ni service multi-utilisateur exposé.
 
 Le contenu du repository est non fiable et ne peut ajouter de nouveaux outils. Les chemins sensibles courants et fichiers inadaptés sont exclus. Il n'existe pas d'action destructive à confirmer. Le clic sur Propose a solution autorise une génération supplémentaire, pas un fix.
+
+## Incrément post-MVP demandé
+
+Après validation du parcours V2, l'intégration est passée du side panel Chrome à une fenêtre flottante sombre injectée dans GitHub. Le bouton de l'extension et le lanceur dans la page ouvrent le même iframe isolé ; le contexte continue de venir de l'onglet actif.
+
+Une troisième action explicite, Implement solution, a été ajoutée. Elle n'est disponible que pour une solution `proposed` possédant des étapes concrètes. Le serveur reprend l'analyse et la solution de sa session signée par un identifiant opaque, puis OpenAI produit un `ImplementationDraft` structuré. Le validateur refuse les fichiers non lus, créations, suppressions, renommages, binaires, traversées de chemin et diffs incomplets. Le résultat reste un brouillon à copier ou télécharger : aucun checkout, test, commit, push ou PR n'est exécuté.
 
 ### Jalons et résultats vérifiables
 
@@ -156,5 +163,5 @@ Sources :
 - https://docs.github.com/en/copilot/tutorials/explore-issues-and-discussions
 - https://docs.copilotkit.ai/runtime-server-adapter
 - https://docs.copilotkit.ai/programmatic-control
-- https://developer.chrome.com/docs/extensions/reference/api/sidePanel
+- https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts
 - https://developers.openai.com/api/docs/guides/structured-outputs

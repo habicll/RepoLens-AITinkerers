@@ -5,7 +5,7 @@
 1. Installer les dépendances avec `npm ci` et renseigner la clé dans le fichier local `.env`.
 2. Configurer si possible `GITHUB_TOKEN` pour limiter le risque de quota partagé pendant la démo. Les repositories privés restent refusés.
 3. Exécuter `npm run build`, puis `npm start`.
-4. Charger `dist-extension/` dans `chrome://extensions` en mode développeur et épingler RepoLens.
+4. Charger `dist-extension/` dans `chrome://extensions` en mode développeur, puis recharger la page GitHub. Un bouton RepoLens apparaît en bas à droite.
 5. Garder le terminal du backend visible pour les étapes, durées, compteurs d'outils et erreurs. Aucun secret n'est nécessaire à l'écran.
 
 Ne pas ouvrir `.env` pendant la présentation. `npm run check:secrets` contrôle les fichiers destinés à Git ainsi que les builds et l'historique.
@@ -20,18 +20,19 @@ La discussion GitHub peut évoluer. Faire une répétition proche de la présent
 
 ## Parcours de présentation, environ 90 secondes
 
-1. **Partir de GitHub.** Ouvrir l'issue réelle, puis le panneau RepoLens. Montrer que le repository et le numéro de l'issue sont déjà connus, sans copier de texte.
+1. **Partir de GitHub.** Ouvrir l'issue réelle, puis la fenêtre flottante RepoLens. Montrer qu'elle vit au-dessus de GitHub et connaît déjà le repository et le numéro, sans copier de texte.
 2. **Cliquer Understand.** Les étapes montrent la collecte de la discussion et l'exploration ciblée du code. Expliquer que l'agent reçoit seulement quelques extraits.
 3. **Lire le problème.** Une synthèse courte, quelques faits et les tentatives remplacent la lecture de toute la discussion.
 4. **Ouvrir une preuve.** Cliquer la source d'un commentaire, puis celle d'un fichier. Montrer l'extrait et le lien vers les lignes au commit analysé.
 5. **Distinguer observation et hypothèse.** Montrer le bloc Working hypothesis, les limites de contexte et les questions encore ouvertes.
 6. **Demander la solution.** Cliquer Propose a solution. Aucun plan n'apparaît avant ce clic. Si le comportement attendu est encore contesté, montrer la question précise à résoudre plutôt qu'annoncer un correctif certain.
+7. **Implémenter quand c'est responsable.** Sur une issue dont la solution est concrète, cliquer Implement solution. Montrer le diff, ses fichiers sources et les actions Copy/Download. Répéter qu'il s'agit d'un brouillon non appliqué et non testé. Sur l'issue Express, l'absence de bouton est le bon comportement tant que le désaccord reste ouvert.
 
 Phrase de présentation : « RepoLens transforme une discussion GitHub dispersée en contexte d'ingénierie vérifiable, avant d'écrire le code. »
 
 ## Ce que CopilotKit apporte
 
-Le panneau transmet l'issue courante par `useAgentContext`. Les actions pilotent un agent enregistré dans le runtime CopilotKit ; son état partagé alimente directement progression, sources, analyse et plan. Un changement de page isole le thread et annule le travail précédent. L'expérience est contextuelle et structurée, sans fenêtre de chat générique.
+La fenêtre transmet l'issue courante par `useAgentContext`. Les trois actions pilotent un agent enregistré dans le runtime CopilotKit ; son état partagé alimente directement progression, sources, analyse, plan et patch. Un changement de page isole le thread et annule le travail précédent. L'expérience est contextuelle et structurée, sans fenêtre de chat générique.
 
 ## Si une dépendance externe tombe
 
@@ -42,11 +43,11 @@ Le panneau transmet l'issue courante par `useAgentContext`. Les actions pilotent
 
 ## Vérification technique
 
-Vérification locale du 12 septembre 2026 : **40 tests unitaires et 6 tests navigateur réussis**, typecheck et build réussis. L'audit npm ne signalait aucune vulnérabilité. Le contrôle des secrets a vérifié sources, builds et historique Git ; `.env` n'est pas suivi.
+Vérification locale du 12 septembre 2026 : **43 tests unitaires et 6 tests navigateur réussis**, typecheck et build réussis. L'audit npm ne signalait aucune vulnérabilité. Le contrôle des secrets a vérifié sources, builds et historique Git ; `.env` n'est pas suivi.
 
 Le parcours complet dans le navigateur, avec le vrai runtime CopilotKit, GitHub et OpenAI `gpt-5.4`, a analysé l'issue Express en **21,4 secondes** puis produit la proposition sur clic en **4,7 secondes**. Il a récupéré les sept commentaires et trois fichiers, README compris, identifié `lib/view.js` et `lib/application.js`, et affiché le désaccord sur le comportement attendu avec ses sources. La proposition a correctement demandé de trancher ce comportement, sans présenter un plan de fix comme acquis. Aucune erreur navigateur n'a été détectée.
 
-Ce sont des mesures d'un run local, pas des garanties de latence ni de qualité sur toutes les issues. L'extension MV3 a été vérifiée séparément avec des réponses synthétiques de test ; le clic natif sur l'icône Chrome reste une étape de répétition manuelle.
+Ce sont des mesures d'un run local, pas des garanties de latence ni de qualité sur toutes les issues. La génération structurée du patch a aussi été vérifiée avec OpenAI sur un contexte synthétique borné. Le parcours complet de l'extension MV3 a été vérifié séparément avec des réponses synthétiques de test.
 
 ```bash
 npm run typecheck
