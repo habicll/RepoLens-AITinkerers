@@ -19,6 +19,7 @@ const MAX_TREE_REQUESTS = 14;
 const MAX_API_REQUESTS = 36;
 const CACHE_MAX_ENTRIES = 128;
 const CACHE_MAX_BYTES = 8_000_000;
+const PARTIAL_EXPLORATION = "Repository exploration is partial:";
 
 type JsonObject = Record<string, unknown>;
 interface TreeEntry { path: string; type: "blob" | "tree"; mode: string; sha: string; size?: number }
@@ -125,6 +126,12 @@ export class GitHubRepository {
 
   private limit(message: string): void {
     if (!this.coverage.limits.includes(message)) this.coverage.limits.push(message);
+  }
+  private updateTreeCoverage(): void {
+    this.coverage.pathsDiscovered = this.entries.size;
+    const unvisited = [...this.entries.values()].filter(entry => entry.type === "tree" && !this.directories.has(entry.path)).length;
+    this.coverage.limits = this.coverage.limits.filter(limit => !limit.startsWith(PARTIAL_EXPLORATION));
+    if (unvisited) this.limit(`${PARTIAL_EXPLORATION} ${unvisited} discovered ${unvisited === 1 ? "directory remains" : "directories remain"} unvisited. The path count covers explored directories, not the complete repository.`);
   }
   private ensureReady(): void {
     if (!this.bootstrapped || !this.snapshot) throw new AppError("NOT_READY", "Load the GitHub issue before exploring its repository.", 409);
@@ -236,7 +243,15 @@ export class GitHubRepository {
     const branch = string(repository.default_branch, 250);
     if (!branch) throw new AppError("EMPTY_REPOSITORY", "This repository has no default branch.", 422);
     this.report("Reading issue and fixing a code snapshot");
-    const issue = object(await this.request(`${this.prefix}/issues/${this.ref.number}`, 15_000));
+    const [issueResult, branchResult] = await Promise.allSettled([
+      this.request(`${this.prefix}/issues/${this.ref.number}`, 15_000),
+      this.request(`${this.prefix}/branches/${encodeURIComponent(branch)}`),
+    ]);
+    // Settle the wave before touching shared state or propagating failures.
+    if (issueResult.status === "rejected") throw issueResult.reason;
+    if (branchResult.status === "rejected") throw branchResult.reason;
+    const issue = object(issueResult.value);
+    const branchData = object(branchResult.value);
     if (issue.pull_request) throw new AppError("UNSUPPORTED_PAGE", "Open a GitHub issue. Pull request analysis is outside this demo.", 422);
     this.metadata = {
       title: string(issue.title, 500), state: string(issue.state, 30), author: login(issue.user),
@@ -250,22 +265,29 @@ export class GitHubRepository {
       label: `Issue #${this.ref.number}`, author: this.metadata.author, createdAt: string(issue.created_at, 40),
       excerpt: `${this.metadata.title}\nState: ${this.metadata.state}\nLabels: ${this.metadata.labels.join(", ")}\nAssignees: ${this.metadata.assignees.join(", ")}\nMilestone: ${this.metadata.milestone ?? "none"}\n\n${string(issue.body, 200_000)}`,
     }, 8_000);
-    const branchData = object(await this.request(`${this.prefix}/branches/${encodeURIComponent(branch)}`));
     const commit = object(branchData.commit);
     const commitSha = sha(commit.sha);
     this.rootTreeSha = sha(object(object(commit.commit).tree).sha);
     this.snapshot = { id: "", commitSha, branch, fetchedAt: new Date().toISOString() };
-    await this.loadComments(string(issue.updated_at, 100));
+    this.report("Reading discussion, README and repository structure");
+    const [commentsResult, treeResult, readmeResult] = await Promise.allSettled([
+      this.loadComments(string(issue.updated_at, 100)),
+      this.loadDirectory("", this.rootTreeSha),
+      this.request(`${this.prefix}/readme?ref=${commitSha}`, 600_000, 160_000),
+    ]);
+    if (commentsResult.status === "rejected") throw commentsResult.reason;
+    if (treeResult.status === "rejected") throw treeResult.reason;
     this.snapshot.id = createHash("sha256").update(JSON.stringify({
       issue: issueKey(this.ref), updated: issue.updated_at, commitSha,
       evidence: this.sources.map(source => [source.id, source.excerpt]),
     })).digest("hex").slice(0, 20);
-    this.report("Inspecting repository structure");
-    await this.loadDirectory("", this.rootTreeSha);
     this.bootstrapped = true;
-    this.report("Reading repository README");
+    this.report("Verifying README against the code snapshot");
     try {
-      const readmeData = object(await this.request(`${this.prefix}/readme?ref=${commitSha}`, 600_000, 160_000));
+      // README retrieval overlaps the root tree, but verification and source-budget
+      // mutations happen only after that tree and the comments have settled.
+      if (readmeResult.status === "rejected") throw readmeResult.reason;
+      const readmeData = object(readmeResult.value);
       const path = validatePath(string(readmeData.path, 501));
       const entry = await this.locate(path);
       this.readmePath = path;
@@ -342,6 +364,7 @@ export class GitHubRepository {
         this.coverage.treeTruncated = true;
         this.limit(`Directory ${directory || "/"} exceeds the retrieval budget.`);
         this.directories.set(directory, []);
+        this.updateTreeCoverage();
         return [];
       }
       throw error;
@@ -370,7 +393,7 @@ export class GitHubRepository {
       this.entries.set(path, parsed);
     }
     this.directories.set(directory, entries);
-    this.coverage.pathsDiscovered = this.entries.size;
+    this.updateTreeCoverage();
     return entries;
   }
 
@@ -395,6 +418,7 @@ export class GitHubRepository {
   private directoryView(directory: string): unknown {
     const entries = this.directories.get(directory) ?? [];
     const partial = entries.length > MAX_VISIBLE_PATHS;
+    const unvisitedDirectories = entries.filter(entry => entry.type === "tree" && !this.directories.has(entry.path)).length;
     if (partial) {
       this.coverage.treeTruncated = true;
       this.limit(`Directory ${directory || "/"}: only ${MAX_VISIBLE_PATHS} paths are shown; search can query the discovered paths.`);
@@ -403,7 +427,8 @@ export class GitHubRepository {
       directory: directory || "/", commitSha: this.snapshot?.commitSha,
       entries: entries.slice(0, MAX_VISIBLE_PATHS).map(entry => ({ path: entry.path, type: entry.type === "tree" ? "directory" : "file", bytes: entry.size })),
       shown: Math.min(entries.length, MAX_VISIBLE_PATHS), discovered: entries.length,
-      partial: partial || this.coverage.treeTruncated,
+      partial: partial || this.coverage.treeTruncated || unvisitedDirectories > 0,
+      unvisitedDirectories,
       note: "Paths are candidates, not source evidence. Read a file before citing it. This is a shallow directory view; request overview(directory) to explore children.",
     };
   }

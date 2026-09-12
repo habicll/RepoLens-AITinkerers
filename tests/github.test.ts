@@ -139,6 +139,9 @@ describe("GitHubRepository evidence retrieval", () => {
     expect(requests.filter(request => request.url.pathname.endsWith("/comments")).map(request => request.url.searchParams.get("page"))).toEqual(["1", "2"]);
     const last = repository.sources.filter(source => source.kind === "comment").at(-1)!;
     expect(last.url).toBe("https://github.com/demo/project/issues/12#issuecomment-100");
+    // A fast README response must not reorder source-budget allocation ahead of discussion pages.
+    expect(repository.sources.slice(1, 101).every(source => source.kind === "comment")).toBe(true);
+    expect(repository.sources.at(-1)?.kind).toBe("readme");
     expect(repository.coverage.limits.join(" ")).toContain("Later discussion may be missing");
   });
 
@@ -172,6 +175,21 @@ describe("GitHubRepository evidence retrieval", () => {
       expect(repository.coverage.limits.join(" ")).toContain("README unavailable");
       expect(repository.getSeed()).toBeDefined();
     }
+  });
+
+  it("distinguishes unexplored directories from a GitHub-truncated tree", async () => {
+    const { make } = fixture();
+    const repository = make();
+    await repository.bootstrap();
+    expect(repository.coverage.treeTruncated).toBe(false);
+    expect(repository.coverage.limits.join(" ")).toContain("2 discovered directories remain unvisited");
+    const root = await repository.overview() as { result: { partial: boolean; unvisitedDirectories: number } };
+    expect(root.result).toMatchObject({ partial: true, unvisitedDirectories: 2 });
+    await repository.overview("src");
+    expect(repository.coverage.limits.join(" ")).toContain("1 discovered directory remains unvisited");
+    await repository.overview("tests");
+    expect(repository.coverage.limits.join(" ")).not.toContain("remain unvisited");
+    expect(repository.coverage.treeTruncated).toBe(false);
   });
 
   it("does not follow secret paths, parent traversal, symlinks or submodules", async () => {

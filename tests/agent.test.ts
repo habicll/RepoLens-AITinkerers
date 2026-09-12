@@ -5,6 +5,7 @@ import { initialState, type Analysis, type IssueRef, type RepoLensState, type So
 import { RepoLensAgent } from "../server/agent.js";
 import { understand, validateEvidence, type Complete, type ModelResponse, type RepositoryReader } from "../server/analysis.js";
 import { AnalysisSessionStore } from "../server/session.js";
+import { AppError } from "../server/errors.js";
 
 const issue: IssueRef = { owner: "demo", repo: "parser", number: 12, url: "https://github.com/demo/parser/issues/12" };
 const sources: Source[] = [
@@ -160,6 +161,19 @@ describe("AG-UI execution", () => {
 });
 
 describe("bounded model workflow", () => {
+  it("summarizes collected evidence when repository expansion hits its retrieval cap", async () => {
+    const repository = repo();
+    repository.readFile = vi.fn(async () => { throw new AppError("CONTEXT_BUDGET", "The six-file budget has been reached.", 429); });
+    const complete = vi.fn<Complete>().mockResolvedValueOnce({ status: "completed", output: [
+      { type: "function_call", name: "read_file", call_id: "limit-call", arguments: '{"path":"other.ts","startLine":null,"endLine":null}' },
+    ] }).mockResolvedValueOnce(response(JSON.stringify(analysis)));
+    const result = await understand({ issue, repository, model: "test", complete, signal: new AbortController().signal,
+      counts: { modelCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0 }, report: () => {}, deadline: Date.now() + 90_000 });
+    expect(result.analysis).toEqual(analysis);
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[1][0].tools).toBeUndefined();
+  });
+
   it("reserves a final structured call and enforces the ten-tool budget", async () => {
     const calls: ResponseCreateParamsNonStreaming[] = [];
     const repository = repo();
