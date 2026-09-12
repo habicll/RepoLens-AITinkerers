@@ -169,6 +169,7 @@ Pour un test réel GitHub + OpenAI (consomme des crédits API) :
 
 ```bash
 npm run check:live -- https://github.com/expressjs/express/issues/7350 --solution
+npm run check:live -- https://github.com/expressjs/express/issues/7350 --forensics
 npm run check:live -- https://github.com/expressjs/express
 ```
 
