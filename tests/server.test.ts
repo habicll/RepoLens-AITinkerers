@@ -46,6 +46,15 @@ describe("local API boundary", () => {
     const response = await fetch(`${origin}/api/health`, { headers: { Origin: "http://127.0.0.1:5173" } });
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:5173");
-    expect(await response.json()).toEqual({ status: "ok", openaiConfigured: true, githubConfigured: false, model: "test" });
+    expect(await response.json()).toEqual({ status: "ok", openaiConfigured: true, githubConfigured: false, localExecutionEnabled: false, model: "test" });
+  });
+
+  it("keeps local execution disabled without an explicit server opt-in", async () => {
+    const response = await fetch(`${origin}/api/local-launch/start`, {
+      method: "POST", headers: { Origin: "http://127.0.0.1:5173", "Content-Type": "application/json" },
+      body: JSON.stringify({ repositoryAnalysisId: crypto.randomUUID(), threadId: "thread", approval: "RUN_UNTRUSTED_REPOSITORY_CODE" }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "REPOSITORY_ANALYSIS_REQUIRED" } });
   });
 });
