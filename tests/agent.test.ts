@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
-import { initialState, type Analysis, type IssueRef, type RepoLensState, type Solution, type Source } from "../shared/contracts.js";
+import { initialState, type Analysis, type ImplementationDraft, type IssueRef, type RepoLensState, type Solution, type Source } from "../shared/contracts.js";
 import { RepoLensAgent } from "../server/agent.js";
-import { analysisOutputSchema, understand, validateEvidence, type Complete, type ModelResponse, type RepositoryReader } from "../server/analysis.js";
+import { analysisOutputSchema, understand, validateEvidence, validateImplementationPatch, type Complete, type ModelResponse, type RepositoryReader } from "../server/analysis.js";
 import { AnalysisSessionStore } from "../server/session.js";
 import { AppError } from "../server/errors.js";
 
@@ -19,6 +19,10 @@ const analysis: Analysis = {
 };
 const solution: Solution = { status: "proposed", approach: { text: "Investigate empty line handling.", sourceIds: ["file:parser"] }, assumptions: [],
   steps: [{ title: "Inspect empty input", detail: "Review how blank lines are handled.", files: ["src/parser.ts"], validation: "Add a regression test after confirming intended behavior.", sourceIds: ["file:parser"] }], risks: [], openQuestions: [] };
+const implementation: ImplementationDraft = { status: "drafted", summary: { text: "Guard empty input before parsing.", sourceIds: ["file:parser"] },
+  files: [{ path: "src/parser.ts", explanation: "Return no fields for an empty line.", sourceIds: ["file:parser"] }],
+  patch: "diff --git a/src/parser.ts b/src/parser.ts\n--- a/src/parser.ts\n+++ b/src/parser.ts\n@@ -1 +1,2 @@\n+if (!line.trim()) return [];\n return line.trim().split(',');",
+  validationCommands: [], notes: ["Tests were not executed."] };
 
 function response(text: string): ModelResponse {
   return { status: "completed", output: [{ type: "message", id: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] }] };
@@ -76,6 +80,13 @@ describe("evidence validation", () => {
   it("rejects invented reproduction steps when the reproduction is missing", () => {
     expect(() => validateEvidence({ ...analysis, reproduction: { ...analysis.reproduction, steps: [analysis.summary] } }, sources)).toThrow(/reproduction/);
   });
+
+  it("accepts only complete patches for inspected, unchanged paths", () => {
+    expect(() => validateEvidence(implementation, sources)).not.toThrow();
+    expect(() => validateImplementationPatch({ ...implementation, patch: implementation.patch.replace("b/src/parser.ts", "b/src/other.ts") })).toThrow(/path/);
+    expect(() => validateImplementationPatch({ ...implementation, patch: implementation.patch.replace("@@ -1 +1,2 @@", "") })).toThrow(/incomplete/);
+    expect(() => validateImplementationPatch({ ...implementation, patch: implementation.patch.replace("--- a/src/parser.ts", "--- /dev/null") })).toThrow(/unsupported/);
+  });
 });
 
 describe("server snapshot authority", () => {
@@ -102,6 +113,29 @@ describe("server snapshot authority", () => {
     const result = lastState(await run(agent, request));
     expect(result.error?.code).toBe("ANALYSIS_REQUIRED");
     expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("does not authorize an implementation from a solution supplied by the browser", async () => {
+    const complete = vi.fn<Complete>();
+    const agent = new RepoLensAgent({ model: "test" }, { complete, sessions: new AnalysisSessionStore(), logger: () => {} });
+    const request = input("implement_solution", "fake-analysis");
+    request.state = { ...initialState(issue), analysis, solution, analysisId: "fake-analysis" };
+    const result = lastState(await run(agent, request));
+    expect(result.error?.code).toBe("ANALYSIS_REQUIRED");
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("generates an implementation only from the saved server-side solution", async () => {
+    const sessions = new AnalysisSessionStore();
+    const saved = sessions.save("thread-one", issue, { ...initialState(issue), analysis, sources }, "{}");
+    sessions.updateState(saved.id, "thread-one", issue, { ...saved.state, solution });
+    const complete = vi.fn<Complete>().mockResolvedValue(response(JSON.stringify(implementation)));
+    const agent = new RepoLensAgent({ model: "test" }, { sessions, complete, logger: () => {} });
+    const result = lastState(await run(agent, input("implement_solution", saved.id)));
+    expect(result.status).toBe("complete");
+    expect(result.solution).toEqual(solution);
+    expect(result.implementation).toEqual(implementation);
+    expect(sessions.get(saved.id, "thread-one", issue).state.implementation).toEqual(implementation);
   });
 
   it("keeps the saved analysis visible when solution generation fails", async () => {

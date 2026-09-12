@@ -77,6 +77,20 @@ export const SolutionSchema = z.object({
 });
 export type Solution = z.infer<typeof SolutionSchema>;
 
+export const ImplementationDraftSchema = z.object({
+  status: z.enum(["drafted", "needs_more_information"]),
+  summary: ClaimSchema,
+  files: z.array(z.object({
+    path: z.string().min(1).max(500),
+    explanation: z.string().min(1).max(500),
+    sourceIds: z.array(z.string()).min(1).max(6),
+  })).max(5),
+  patch: z.string().max(24_000),
+  validationCommands: z.array(z.string().min(1).max(300)).max(6),
+  notes: z.array(z.string().min(1).max(500)).max(5),
+});
+export type ImplementationDraft = z.infer<typeof ImplementationDraftSchema>;
+
 export interface Source {
   id: string;
   kind: "issue" | "comment" | "file" | "readme";
@@ -128,13 +142,14 @@ export interface RepoLensState {
   analysisId: string | null;
   analysis: Analysis | null;
   solution: Solution | null;
+  implementation: ImplementationDraft | null;
   error: AgentError | null;
 }
 export function initialState(issue: IssueRef | null = null): RepoLensState {
   return {
     issue, metadata: null, runId: null, status: "idle", phase: "", activities: [], sources: [],
     coverage: { commentsTotal: 0, commentsRead: 0, commentsTruncated: false, filesRead: 0, pathsDiscovered: 0, treeTruncated: false, codeSearch: "not_used", limits: [] },
-    snapshot: null, analysisId: null, analysis: null, solution: null, error: null,
+    snapshot: null, analysisId: null, analysis: null, solution: null, implementation: null, error: null,
   };
 }
 export interface HealthInfo { status: string; openaiConfigured: boolean; githubConfigured: boolean; model: string }

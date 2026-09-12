@@ -37,6 +37,13 @@ export class AnalysisSessionStore {
     return structuredClone(entry);
   }
 
+  updateState(id: string, threadId: string, issue: IssueRef, state: RepoLensState): AnalysisSession {
+    const existing = this.get(id, threadId, issue);
+    const updated = { ...existing, state: structuredClone({ ...state, analysisId: id }) };
+    this.entries.set(id, updated);
+    return structuredClone(updated);
+  }
+
   private prune(): void {
     for (const [id, entry] of this.entries) if (this.now() - entry.createdAt >= this.ttlMs) this.entries.delete(id);
   }

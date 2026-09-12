@@ -2,9 +2,9 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { FunctionTool, Response, ResponseCreateParamsNonStreaming, ResponseInput } from "openai/resources/responses/responses";
 import { z } from "zod";
-import { AnalysisSchema, ClaimSchema, SolutionSchema, type Analysis, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
+import { AnalysisSchema, ClaimSchema, ImplementationDraftSchema, SolutionSchema, type Analysis, type ImplementationDraft, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
-import { ANALYSIS_PROMPT, INVESTIGATION_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
+import { ANALYSIS_PROMPT, IMPLEMENTATION_PROMPT, INVESTIGATION_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
 
 export interface RepositoryReader {
   metadata: IssueMetadata | null;
@@ -57,7 +57,7 @@ export const REPOSITORY_TOOLS: FunctionTool[] = [
     parameters: { type: "object", properties: { path: { type: "string" }, startLine: { type: ["integer", "null"] }, endLine: { type: ["integer", "null"] } }, required: ["path", "startLine", "endLine"], additionalProperties: false } },
 ];
 
-export function validateEvidence(result: Analysis | Solution, sources: Source[]): void {
+export function validateEvidence(result: Analysis | Solution | ImplementationDraft, sources: Source[]): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   const visit = (value: unknown): void => {
     if (typeof value === "string" && sources.some(source => value.includes(source.id))) {
@@ -82,11 +82,38 @@ export function validateEvidence(result: Analysis | Solution, sources: Source[])
     if (result.reproduction.status === "missing" && result.reproduction.steps.length) {
       throw new AppError("INVALID_EVIDENCE", "The generated result included unsupported reproduction steps. Please retry.", 502, true);
     }
-  } else {
+  } else if ("steps" in result) {
     for (const step of result.steps) for (const path of step.files) checkPath(path, step.sourceIds);
     if (result.status === "needs_more_information" && result.steps.length) {
       throw new AppError("INVALID_EVIDENCE", "The proposed plan conflicts with its missing-information status. Please retry.", 502, true);
     }
+  } else {
+    for (const file of result.files) checkPath(file.path, file.sourceIds);
+    validateImplementationPatch(result);
+  }
+}
+
+export function validateImplementationPatch(draft: ImplementationDraft): void {
+  if (draft.status === "needs_more_information") {
+    if (draft.patch.trim() || draft.files.length) throw new AppError("INVALID_PATCH", "A blocked implementation cannot contain a speculative patch.", 502, true);
+    return;
+  }
+  if (!draft.patch.trim() || !draft.files.length) throw new AppError("INVALID_PATCH", "The implementation draft did not contain a patch and inspected files.", 502, true);
+  if (/\/dev\/null|GIT binary patch|Binary files /i.test(draft.patch)) {
+    throw new AppError("INVALID_PATCH", "The generated patch attempted an unsupported file operation. Please retry.", 502, true);
+  }
+  const headers = [...draft.patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)];
+  const paths = new Set<string>();
+  for (const header of headers) {
+    if (header[1] !== header[2] || /(^|\/)\.\.(\/|$)/.test(header[1]) || header[1].startsWith("/")) {
+      throw new AppError("INVALID_PATCH", "The generated patch changed an unexpected path. Please retry.", 502, true);
+    }
+    paths.add(header[1]);
+  }
+  const declared = new Set(draft.files.map(file => file.path));
+  if (!headers.length || !/^diff --git /m.test(draft.patch) || !/^--- a\//m.test(draft.patch) || !/^\+\+\+ b\//m.test(draft.patch) || !/^@@ /m.test(draft.patch)
+    || paths.size !== declared.size || [...paths].some(path => !declared.has(path)) || [...declared].some(path => !paths.has(path))) {
+    throw new AppError("INVALID_PATCH", "The generated patch was incomplete or did not match its inspected files. Please retry.", 502, true);
   }
 }
 
@@ -103,9 +130,9 @@ function account(response: ModelResponse, counts: UsageCounts): void {
   counts.outputTokens += response.usage?.output_tokens ?? 0;
 }
 
-async function finalResult<T extends Analysis | Solution>(options: {
+async function finalResult<T extends Analysis | Solution | ImplementationDraft>(options: {
   schema: z.ZodType<T>; name: string; instructions: string; evidence: string;
-  model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts; sources: Source[];
+  model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts; sources: Source[]; maxOutputTokens?: number;
 }): Promise<T> {
   options.signal.throwIfAborted();
   if (options.evidence.length > MAX_EVIDENCE_CHARS) throw new AppError("CONTEXT_BUDGET", "The saved evidence and analysis exceed the safe context budget. Run Understand again with a smaller issue.", 413);
@@ -114,7 +141,7 @@ async function finalResult<T extends Analysis | Solution>(options: {
   const response = await options.complete({ model: options.model, store: false, stream: false,
     reasoning: reasoningForModel(options.model),
     instructions: options.instructions, input: [{ role: "user", content: options.evidence }],
-    max_output_tokens: 6_000, text: { format: zodTextFormat(options.schema, options.name) },
+    max_output_tokens: options.maxOutputTokens ?? 6_000, text: { format: zodTextFormat(options.schema, options.name) },
   }, options.signal);
   options.signal.throwIfAborted();
   account(response, options.counts);
@@ -195,5 +222,17 @@ export async function proposeSolution(options: {
 }): Promise<Solution> {
   return finalResult({ ...options, schema: SolutionSchema, name: "proposed_solution", instructions: SOLUTION_PROMPT,
     evidence: JSON.stringify({ savedAnalysis: options.analysis, savedEvidence: JSON.parse(options.evidence) }),
+  });
+}
+
+export async function implementSolution(options: {
+  analysis: Analysis; solution: Solution; evidence: string; sources: Source[]; model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts;
+}): Promise<ImplementationDraft> {
+  if (options.solution.status !== "proposed" || !options.solution.steps.length) {
+    throw new AppError("SOLUTION_REQUIRED", "Resolve the open questions and generate a concrete solution before requesting an implementation.", 409);
+  }
+  return finalResult({ ...options, schema: ImplementationDraftSchema, name: "implementation_draft", instructions: IMPLEMENTATION_PROMPT,
+    evidence: JSON.stringify({ savedAnalysis: options.analysis, savedSolution: options.solution, savedEvidence: JSON.parse(options.evidence) }),
+    maxOutputTokens: 8_000,
   });
 }

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { initialState, IssueRefSchema, issueKey, parseIssueUrl, type IssueRef, type RepoLensState } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
 import { GitHubRepository } from "./github.js";
-import { openAICompletion, proposeSolution, understand, type Complete, type RepositoryReader, type UsageCounts } from "./analysis.js";
+import { implementSolution, openAICompletion, proposeSolution, understand, type Complete, type RepositoryReader, type UsageCounts } from "./analysis.js";
 import { AnalysisSessionStore, analysisSessions } from "./session.js";
 
 export interface RepoLensAgentConfig {
@@ -22,7 +22,7 @@ export interface RepoLensAgentDependencies {
   logger?: (counts: UsageCounts & { durationMs: number; intent: string; success: boolean; errorCode?: string; errorStatus?: number; requestId?: string }) => void;
 }
 const CommandSchema = z.object({
-  intent: z.enum(["understand", "propose_solution"]),
+  intent: z.enum(["understand", "propose_solution", "implement_solution"]),
   issue: IssueRefSchema,
   analysisId: z.string().min(1).max(120).optional(),
 }).strict();
@@ -80,7 +80,7 @@ export class RepoLensAgent extends AbstractAgent {
 
       const execute = async () => {
         const parsed = CommandSchema.safeParse(input.forwardedProps);
-        if (!parsed.success) throw new AppError("INVALID_COMMAND", "Choose Understand or Propose a solution for a valid GitHub issue.");
+        if (!parsed.success) throw new AppError("INVALID_COMMAND", "Choose Understand, Propose a solution, or Implement solution for a valid GitHub issue.");
         const command = parsed.data;
         intent = command.intent;
         const issue = validIssue(command.issue);
@@ -97,13 +97,20 @@ export class RepoLensAgent extends AbstractAgent {
           if (!contextRef.success || issueKey(validIssue(contextRef.data)) !== issueKey(issue)) throw new AppError("STALE_CONTEXT", "The page changed. Run Understand for the currently open issue.", 409);
         }
         const sessions = this.dependencies.sessions ?? analysisSessions;
-        const saved = command.intent === "propose_solution" ? sessions.get(command.analysisId, input.threadId, issue) : null;
-        if (saved) state = { ...saved.state, issue, runId: input.runId, status: "loading", phase: "Preparing the solution", activities: [], solution: null, error: null };
+        const saved = command.intent !== "understand" ? sessions.get(command.analysisId, input.threadId, issue) : null;
+        if (saved) state = { ...saved.state, issue, runId: input.runId, status: "loading",
+          phase: command.intent === "implement_solution" ? "Preparing an implementation draft" : "Preparing the solution",
+          activities: [], ...(command.intent === "propose_solution" ? { solution: null, implementation: null } : { implementation: null }), error: null };
         publish();
         if (!this.config.openaiApiKey && !this.dependencies.complete) throw new AppError("OPENAI_NOT_CONFIGURED", "Add OPENAI_API_KEY to the server environment, then retry Understand.", 503);
         const complete = this.dependencies.complete ?? openAICompletion(this.config.openaiApiKey!);
 
-        if (saved?.state.analysis) {
+        if (saved?.state.analysis && command.intent === "implement_solution") {
+          if (!saved.state.solution) throw new AppError("SOLUTION_REQUIRED", "Propose a solution before requesting an implementation.", 409);
+          report("Drafting a reviewable patch from inspected code");
+          state.implementation = await implementSolution({ analysis: saved.state.analysis, solution: saved.state.solution,
+            evidence: saved.evidence, sources: saved.state.sources, model: this.config.model, complete, signal: controller.signal, counts });
+        } else if (saved?.state.analysis) {
           report("Proposing a solution from the saved commit and evidence");
           state.solution = await proposeSolution({ analysis: saved.state.analysis, evidence: saved.evidence, sources: saved.state.sources,
             model: this.config.model, complete, signal: controller.signal, counts });
@@ -124,9 +131,10 @@ export class RepoLensAgent extends AbstractAgent {
         controller.signal.throwIfAborted();
         successful = true;
         state.status = "complete";
-        state.phase = intent === "understand" ? "Understanding complete" : "Solution proposed";
+        state.phase = intent === "understand" ? "Understanding complete" : intent === "propose_solution" ? "Solution proposed" : "Implementation draft ready";
         state.activities = state.activities.map(activity => ({ ...activity, status: "done" }));
         state.error = null;
+        if (saved) sessions.updateState(saved.id, input.threadId, issue, state);
         publish();
         observer.next({ type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId });
         observer.complete();
