@@ -2,34 +2,42 @@ import { AbstractAgent } from "@ag-ui/client";
 import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import { Observable } from "rxjs";
 import { z } from "zod";
-import { initialState, IssueRefSchema, issueKey, parseIssueUrl, type IssueRef, type RepoLensState } from "../shared/contracts.js";
+import { initialRepositoryState, initialState, IssueRefSchema, issueKey, parseIssueUrl, parseRepositoryUrl, RepositoryRefSchema, repositoryKey, type IssueRef, type RepositoryRef, type RepoLensState } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
 import { GitHubRepository } from "./github.js";
-import { implementSolution, openAICompletion, proposeSolution, understand, type Complete, type RepositoryReader, type UsageCounts } from "./analysis.js";
-import { AnalysisSessionStore, analysisSessions } from "./session.js";
+import { implementSolution, openAICompletion, proposeSolution, understand, understandRepository, type Complete, type RepositoryReader, type UsageCounts } from "./analysis.js";
+import { GitHubProject, type ProjectReader } from "./project.js";
+import { AnalysisSessionStore, analysisSessions, RepositorySessionStore, repositorySessions } from "./session.js";
 
 export interface RepoLensAgentConfig {
   openaiApiKey?: string;
   model: string;
   githubToken?: string;
   allowedRepos?: string[];
+  localExecutionEnabled?: boolean;
 }
 export interface RepoLensAgentDependencies {
   complete?: Complete;
   createRepository?: (issue: IssueRef, signal: AbortSignal, report: (label: string) => void) => RepositoryReader;
+  createProject?: (repository: RepositoryRef, signal: AbortSignal, report: (label: string) => void) => ProjectReader;
   sessions?: AnalysisSessionStore;
+  repositorySessions?: RepositorySessionStore;
   timeoutMs?: number;
   logger?: (counts: UsageCounts & { durationMs: number; intent: string; success: boolean; errorCode?: string; errorStatus?: number; requestId?: string }) => void;
 }
-const CommandSchema = z.object({
-  intent: z.enum(["understand", "propose_solution", "implement_solution"]),
-  issue: IssueRefSchema,
-  analysisId: z.string().min(1).max(120).optional(),
-}).strict();
+const CommandSchema = z.discriminatedUnion("intent", [
+  z.object({ intent: z.enum(["understand", "propose_solution", "implement_solution"]), issue: IssueRefSchema, analysisId: z.string().min(1).max(120).optional() }).strict(),
+  z.object({ intent: z.literal("understand_repository"), repository: RepositoryRefSchema }).strict(),
+]);
 
 function validIssue(value: IssueRef): IssueRef {
   const parsed = parseIssueUrl(value.url);
   if (!parsed || issueKey(parsed) !== issueKey(value)) throw new AppError("INVALID_ISSUE", "The issue URL does not match its repository and issue number.");
+  return parsed;
+}
+function validRepository(value: RepositoryRef): RepositoryRef {
+  const parsed = parseRepositoryUrl(value.url);
+  if (!parsed || repositoryKey(parsed) !== repositoryKey(value)) throw new AppError("INVALID_REPOSITORY", "The repository URL does not match its owner and name.");
   return parsed;
 }
 
@@ -65,9 +73,11 @@ export class RepoLensAgent extends AbstractAgent {
       let errorMetrics: { errorCode?: string; errorStatus?: number; requestId?: string } = {};
       let state: RepoLensState = { ...initialState(), runId: input.runId, status: "loading" };
       let repository: RepositoryReader | null = null;
+      let project: ProjectReader | null = null;
       const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
       const publish = () => {
         if (repository) state = { ...state, metadata: repository.metadata, snapshot: repository.snapshot, sources: [...repository.sources], coverage: structuredClone(repository.coverage) };
+        if (project) state = { ...state, repositoryMetadata: project.metadata, snapshot: project.snapshot, sources: [...project.sources], coverage: structuredClone(project.coverage), launchProposal: project.proposal };
         if (!observer.closed) observer.next({ type: EventType.STATE_SNAPSHOT, snapshot: structuredClone(state) });
       };
       const report = (label: string) => {
@@ -80,9 +90,44 @@ export class RepoLensAgent extends AbstractAgent {
 
       const execute = async () => {
         const parsed = CommandSchema.safeParse(input.forwardedProps);
-        if (!parsed.success) throw new AppError("INVALID_COMMAND", "Choose Understand, Propose a solution, or Implement solution for a valid GitHub issue.");
+        if (!parsed.success) throw new AppError("INVALID_COMMAND", "Choose Understand for a valid GitHub repository or issue.");
         const command = parsed.data;
         intent = command.intent;
+        if (command.intent === "understand_repository") {
+          const target = validRepository(command.repository);
+          state = { ...initialRepositoryState(target), runId: input.runId, status: "loading", phase: "Reading repository context" };
+          if (this.config.allowedRepos?.length && !this.config.allowedRepos.some(repo => repo.toLowerCase() === repositoryKey(target))) throw new AppError("REPOSITORY_NOT_ALLOWED", "This repository is not enabled on the demo server.", 403);
+          for (const context of input.context ?? []) {
+            if (!/current github repository/i.test(context.description)) continue;
+            let contextValue: unknown;
+            try { contextValue = JSON.parse(context.value); } catch { throw new AppError("INVALID_CONTEXT", "The current page context could not be read. Reopen RepoLens."); }
+            const contextRef = RepositoryRefSchema.safeParse(contextValue);
+            if (!contextRef.success || repositoryKey(validRepository(contextRef.data)) !== repositoryKey(target)) throw new AppError("STALE_CONTEXT", "The page changed. Run Understand for the currently open repository.", 409);
+          }
+          publish();
+          if (!this.config.openaiApiKey && !this.dependencies.complete) throw new AppError("OPENAI_NOT_CONFIGURED", "Add OPENAI_API_KEY to the server environment, then retry Understand.", 503);
+          const complete = this.dependencies.complete ?? openAICompletion(this.config.openaiApiKey!);
+          project = this.dependencies.createProject?.(target, controller.signal, report) ?? new GitHubProject(target, {
+            token: this.config.githubToken, allowedRepos: this.config.allowedRepos, localExecutionEnabled: Boolean(this.config.localExecutionEnabled),
+          }, controller.signal, report);
+          report("Reading the README and repository metadata");
+          await project.bootstrap();
+          publish();
+          report("Writing the repository briefing");
+          state.repositoryAnalysis = await understandRepository({ evidence: project.evidence(), sources: project.sources, model: this.config.model, complete, signal: controller.signal, counts });
+          publish();
+          const store = this.dependencies.repositorySessions ?? repositorySessions;
+          const entry = store.save(input.threadId, target, state, project.recipe);
+          state.repositoryAnalysisId = entry.id;
+          successful = true;
+          state.status = "complete";
+          state.phase = "Repository briefing ready";
+          state.activities = state.activities.map(activity => ({ ...activity, status: "done" }));
+          publish();
+          observer.next({ type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId });
+          observer.complete();
+          return;
+        }
         const issue = validIssue(command.issue);
         state.issue = issue;
         if (this.config.allowedRepos?.length && !this.config.allowedRepos.some(repo => repo.toLowerCase() === `${issue.owner}/${issue.repo}`.toLowerCase())) {

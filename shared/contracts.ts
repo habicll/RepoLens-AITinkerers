@@ -8,6 +8,13 @@ export const IssueRefSchema = z.object({
 });
 export type IssueRef = z.infer<typeof IssueRefSchema>;
 
+export const RepositoryRefSchema = z.object({
+  owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,99}$/),
+  repo: z.string().regex(/^[a-zA-Z0-9_.-]{1,100}$/),
+  url: z.string().url(),
+});
+export type RepositoryRef = z.infer<typeof RepositoryRefSchema>;
+
 export function parseIssueUrl(value: string): IssueRef | null {
   try {
     const url = new URL(value.trim());
@@ -20,6 +27,20 @@ export function parseIssueUrl(value: string): IssueRef | null {
 }
 export function issueKey(ref: IssueRef): string {
   return `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase();
+}
+
+export function parseRepositoryUrl(value: string): RepositoryRef | null {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" || url.hostname !== "github.com" || url.port || url.username || url.password) return null;
+    const match = /^\/([^/]+)\/([^/]+)\/?$/.exec(url.pathname);
+    if (!match || match[2].endsWith(".git")) return null;
+    const result = RepositoryRefSchema.safeParse({ owner: match[1], repo: match[2], url: `https://github.com/${match[1]}/${match[2]}` });
+    return result.success ? result.data : null;
+  } catch { return null; }
+}
+export function repositoryKey(ref: RepositoryRef): string {
+  return `${ref.owner}/${ref.repo}`.toLowerCase();
 }
 
 export const ClaimSchema = z.object({
@@ -91,9 +112,46 @@ export const ImplementationDraftSchema = z.object({
 });
 export type ImplementationDraft = z.infer<typeof ImplementationDraftSchema>;
 
+export const RepositoryAnalysisSchema = z.object({
+  summary: ClaimSchema,
+  whatItDoes: ClaimSchema,
+  audience: ClaimSchema,
+  keyConcepts: z.array(ClaimSchema).max(5),
+  architecture: z.array(ClaimSchema).max(5),
+  quickStart: z.array(ClaimSchema).max(7),
+  importantSections: z.array(z.object({
+    title: z.string().min(1).max(160),
+    explanation: z.string().min(1).max(500),
+    sourceIds: z.array(z.string()).min(1).max(6),
+  })).max(6),
+  unknowns: z.array(z.string().min(1).max(500)).max(6),
+});
+export type RepositoryAnalysis = z.infer<typeof RepositoryAnalysisSchema>;
+
+export const LocalLaunchProposalSchema = z.object({
+  status: z.enum(["available", "unsupported", "disabled"]),
+  runtime: z.string().max(100).nullable(),
+  commands: z.array(z.string().min(1).max(300)).max(6),
+  reason: z.string().min(1).max(500),
+  requiresApproval: z.literal(true),
+});
+export type LocalLaunchProposal = z.infer<typeof LocalLaunchProposalSchema>;
+
+export const LocalLaunchStatusSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["queued", "cloning", "installing", "starting", "running", "exited", "stopped", "error"]),
+  phase: z.string().max(300),
+  lines: z.array(z.string().max(1_200)).max(500),
+  url: z.string().url().nullable(),
+  exitCode: z.number().int().nullable(),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+});
+export type LocalLaunchStatus = z.infer<typeof LocalLaunchStatusSchema>;
+
 export interface Source {
   id: string;
-  kind: "issue" | "comment" | "file" | "readme";
+  kind: "issue" | "comment" | "repository" | "file" | "readme";
   url: string;
   label: string;
   excerpt: string;
@@ -110,6 +168,14 @@ export interface IssueMetadata {
   labels: string[];
   assignees: string[];
   milestone: string | null;
+}
+export interface RepositoryMetadata {
+  name: string;
+  description: string | null;
+  language: string | null;
+  stars: number;
+  topics: string[];
+  license: string | null;
 }
 export interface Coverage {
   commentsTotal: number;
@@ -131,7 +197,9 @@ export interface Activity { id: string; label: string; status: "running" | "done
 export interface AgentError { code: string; message: string; retryable: boolean }
 export interface RepoLensState {
   issue: IssueRef | null;
+  repository: RepositoryRef | null;
   metadata: IssueMetadata | null;
+  repositoryMetadata: RepositoryMetadata | null;
   runId: string | null;
   status: "idle" | "loading" | "complete" | "error" | "permission_denied" | "empty";
   phase: string;
@@ -143,13 +211,20 @@ export interface RepoLensState {
   analysis: Analysis | null;
   solution: Solution | null;
   implementation: ImplementationDraft | null;
+  repositoryAnalysisId: string | null;
+  repositoryAnalysis: RepositoryAnalysis | null;
+  launchProposal: LocalLaunchProposal | null;
   error: AgentError | null;
 }
 export function initialState(issue: IssueRef | null = null): RepoLensState {
   return {
-    issue, metadata: null, runId: null, status: "idle", phase: "", activities: [], sources: [],
+    issue, repository: null, metadata: null, repositoryMetadata: null, runId: null, status: "idle", phase: "", activities: [], sources: [],
     coverage: { commentsTotal: 0, commentsRead: 0, commentsTruncated: false, filesRead: 0, pathsDiscovered: 0, treeTruncated: false, codeSearch: "not_used", limits: [] },
-    snapshot: null, analysisId: null, analysis: null, solution: null, implementation: null, error: null,
+    snapshot: null, analysisId: null, analysis: null, solution: null, implementation: null,
+    repositoryAnalysisId: null, repositoryAnalysis: null, launchProposal: null, error: null,
   };
 }
-export interface HealthInfo { status: string; openaiConfigured: boolean; githubConfigured: boolean; model: string }
+export function initialRepositoryState(repository: RepositoryRef): RepoLensState {
+  return { ...initialState(), repository };
+}
+export interface HealthInfo { status: string; openaiConfigured: boolean; githubConfigured: boolean; localExecutionEnabled: boolean; model: string }

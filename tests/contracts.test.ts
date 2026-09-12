@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { issueKey, parseIssueUrl } from "../shared/contracts.js";
+import { issueKey, parseIssueUrl, parseRepositoryUrl, repositoryKey } from "../shared/contracts.js";
 
 describe("GitHub issue identity", () => {
   it("normalizes parameters and anchors while preserving the issue", () => {
@@ -18,4 +18,16 @@ describe("GitHub issue identity", () => {
     "https://github.com/owner/repo/issues/1/comments",
     "https://github.com/owner/repo/issues/99999999999999999",
   ])("rejects unsupported or misleading URL %s", (url) => expect(parseIssueUrl(url)).toBeNull());
+});
+
+describe("GitHub repository identity", () => {
+  it("accepts only the repository root and normalizes its URL", () => {
+    const ref = parseRepositoryUrl("https://github.com/OpenAI/openai-node/?tab=readme-ov-file#readme")!;
+    expect(ref.url).toBe("https://github.com/OpenAI/openai-node");
+    expect(repositoryKey(ref)).toBe("openai/openai-node");
+  });
+  it.each([
+    "http://github.com/owner/repo", "https://github.com.evil.test/owner/repo", "https://github.com/owner/repo.git",
+    "https://github.com/owner/repo/tree/main", "https://github.com/owner/repo/issues", "https://github.com/owner",
+  ])("rejects unsupported repository URL %s", url => expect(parseRepositoryUrl(url)).toBeNull());
 });

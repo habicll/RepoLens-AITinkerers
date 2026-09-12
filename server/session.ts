@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { issueKey, type IssueRef, type RepoLensState } from "../shared/contracts.js";
+import { issueKey, repositoryKey, type IssueRef, type RepositoryRef, type RepoLensState } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
+import type { LocalLaunchRecipe } from "./project.js";
 
 export interface AnalysisSession {
   id: string;
@@ -50,3 +51,42 @@ export class AnalysisSessionStore {
 }
 
 export const analysisSessions = new AnalysisSessionStore();
+
+export interface RepositorySession {
+  id: string;
+  threadId: string;
+  repositoryKey: string;
+  state: RepoLensState;
+  recipe: LocalLaunchRecipe | null;
+  createdAt: number;
+}
+
+export class RepositorySessionStore {
+  private readonly entries = new Map<string, RepositorySession>();
+  constructor(private readonly now: () => number = Date.now, private readonly ttlMs = 15 * 60_000, private readonly maximum = 10) {}
+
+  save(threadId: string, repository: RepositoryRef, state: RepoLensState, recipe: LocalLaunchRecipe | null): RepositorySession {
+    this.prune();
+    for (const [id, entry] of this.entries) if (entry.threadId === threadId && entry.repositoryKey === repositoryKey(repository)) this.entries.delete(id);
+    while (this.entries.size >= this.maximum) this.entries.delete(this.entries.keys().next().value!);
+    const id = randomUUID();
+    const entry: RepositorySession = { id, threadId, repositoryKey: repositoryKey(repository), state: structuredClone({ ...state, repositoryAnalysisId: id }), recipe: structuredClone(recipe), createdAt: this.now() };
+    this.entries.set(id, entry);
+    return structuredClone(entry);
+  }
+
+  get(id: string | undefined, threadId: string, repository?: RepositoryRef): RepositorySession {
+    this.prune();
+    const entry = id ? this.entries.get(id) : undefined;
+    if (!entry || entry.threadId !== threadId || (repository && entry.repositoryKey !== repositoryKey(repository))) {
+      throw new AppError("REPOSITORY_ANALYSIS_REQUIRED", "Understand this repository first. Its saved briefing may have expired; run Understand again.", 409);
+    }
+    return structuredClone(entry);
+  }
+
+  private prune(): void {
+    for (const [id, entry] of this.entries) if (this.now() - entry.createdAt >= this.ttlMs) this.entries.delete(id);
+  }
+}
+
+export const repositorySessions = new RepositorySessionStore();

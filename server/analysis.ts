@@ -2,9 +2,9 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { FunctionTool, Response, ResponseCreateParamsNonStreaming, ResponseInput } from "openai/resources/responses/responses";
 import { z } from "zod";
-import { AnalysisSchema, ClaimSchema, ImplementationDraftSchema, SolutionSchema, type Analysis, type ImplementationDraft, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
+import { AnalysisSchema, ClaimSchema, ImplementationDraftSchema, RepositoryAnalysisSchema, SolutionSchema, type Analysis, type ImplementationDraft, type RepositoryAnalysis, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
-import { ANALYSIS_PROMPT, IMPLEMENTATION_PROMPT, INVESTIGATION_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
+import { ANALYSIS_PROMPT, IMPLEMENTATION_PROMPT, INVESTIGATION_PROMPT, REPOSITORY_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
 
 export interface RepositoryReader {
   metadata: IssueMetadata | null;
@@ -57,7 +57,7 @@ export const REPOSITORY_TOOLS: FunctionTool[] = [
     parameters: { type: "object", properties: { path: { type: "string" }, startLine: { type: ["integer", "null"] }, endLine: { type: ["integer", "null"] } }, required: ["path", "startLine", "endLine"], additionalProperties: false } },
 ];
 
-export function validateEvidence(result: Analysis | Solution | ImplementationDraft, sources: Source[]): void {
+export function validateEvidence(result: Analysis | Solution | ImplementationDraft | RepositoryAnalysis, sources: Source[]): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   const visit = (value: unknown): void => {
     if (typeof value === "string" && sources.some(source => value.includes(source.id))) {
@@ -87,7 +87,7 @@ export function validateEvidence(result: Analysis | Solution | ImplementationDra
     if (result.status === "needs_more_information" && result.steps.length) {
       throw new AppError("INVALID_EVIDENCE", "The proposed plan conflicts with its missing-information status. Please retry.", 502, true);
     }
-  } else {
+  } else if ("files" in result) {
     for (const file of result.files) checkPath(file.path, file.sourceIds);
     validateImplementationPatch(result);
   }
@@ -130,7 +130,7 @@ function account(response: ModelResponse, counts: UsageCounts): void {
   counts.outputTokens += response.usage?.output_tokens ?? 0;
 }
 
-async function finalResult<T extends Analysis | Solution | ImplementationDraft>(options: {
+async function finalResult<T extends Analysis | Solution | ImplementationDraft | RepositoryAnalysis>(options: {
   schema: z.ZodType<T>; name: string; instructions: string; evidence: string;
   model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts; sources: Source[]; maxOutputTokens?: number;
 }): Promise<T> {
@@ -152,6 +152,12 @@ async function finalResult<T extends Analysis | Solution | ImplementationDraft>(
   if (!result.success) throw new AppError("INVALID_OUTPUT", "The model returned an invalid structured result. Please retry.", 502, true);
   validateEvidence(result.data, options.sources);
   return result.data;
+}
+
+export async function understandRepository(options: {
+  evidence: string; sources: Source[]; model: string; complete: Complete; signal: AbortSignal; counts: UsageCounts;
+}): Promise<RepositoryAnalysis> {
+  return finalResult({ ...options, schema: RepositoryAnalysisSchema, name: "repository_briefing", instructions: REPOSITORY_PROMPT, evidence: options.evidence, maxOutputTokens: 4_500 });
 }
 
 export async function understand(options: {
