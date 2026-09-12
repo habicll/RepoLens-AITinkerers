@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { FunctionTool, Response, ResponseCreateParamsNonStreaming, ResponseInput } from "openai/resources/responses/responses";
 import { z } from "zod";
-import { AnalysisSchema, SolutionSchema, type Analysis, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
+import { AnalysisSchema, ClaimSchema, SolutionSchema, type Analysis, type Solution, type Source, type IssueRef, type IssueMetadata, type Snapshot, type Coverage } from "../shared/contracts.js";
 import { AppError } from "./errors.js";
 import { ANALYSIS_PROMPT, INVESTIGATION_PROMPT, SOLUTION_PROMPT } from "./prompts.js";
 
@@ -23,6 +23,20 @@ export interface UsageCounts { modelCalls: number; toolCalls: number; inputToken
 export const MAX_MODEL_CALLS = 6;
 export const MAX_TOOL_CALLS = 10;
 const MAX_EVIDENCE_CHARS = 80_000;
+const reasoningForModel = (model: string): ResponseCreateParamsNonStreaming["reasoning"] =>
+  /^gpt-5(?:[.-]|$)/.test(model) && !/(?:pro|chat|codex)/.test(model) ? { effort: "low" } : undefined;
+
+/** When a discussion exists, its highlights cannot be replaced by issue/code restatements. */
+export function analysisOutputSchema(sources: Source[]): z.ZodType<Analysis> {
+  const commentIds = [...new Set(sources.filter(source => source.kind === "comment").map(source => source.id))];
+  if (!commentIds.length) return AnalysisSchema;
+  const discussionClaim = ClaimSchema.extend({
+    sourceIds: z.array(z.enum(commentIds as [string, ...string[]])).min(1).max(6),
+  });
+  return AnalysisSchema.extend({
+    facts: z.array(discussionClaim).min(1).max(3).describe("One to three short discussion highlights, each citing only supplied comment IDs. Prioritize disagreements, counterexamples, and reported outcomes."),
+  });
+}
 
 export function openAICompletion(apiKey: string): Complete {
   const client = new OpenAI({ apiKey, maxRetries: 0, timeout: 85_000 });
@@ -46,13 +60,16 @@ export const REPOSITORY_TOOLS: FunctionTool[] = [
 export function validateEvidence(result: Analysis | Solution, sources: Source[]): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   const visit = (value: unknown): void => {
+    if (typeof value === "string" && sources.some(source => value.includes(source.id))) {
+      throw new AppError("INVALID_OUTPUT", "The generated text included internal citation identifiers. Please retry.", 502, true);
+    }
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) { value.forEach(visit); return; }
     const record = value as Record<string, unknown>;
     if (Array.isArray(record.sourceIds) && record.sourceIds.some(id => typeof id !== "string" || !byId.has(id))) {
       throw new AppError("INVALID_EVIDENCE", "The generated result contained a citation that was not retrieved. Please retry.", 502, true);
     }
-    Object.values(record).forEach(visit);
+    for (const [key, child] of Object.entries(record)) if (key !== "sourceIds") visit(child);
   };
   visit(result);
   const checkPath = (path: string, sourceIds: string[]): void => {
@@ -95,6 +112,7 @@ async function finalResult<T extends Analysis | Solution>(options: {
   if (options.counts.modelCalls >= MAX_MODEL_CALLS) throw new AppError("MODEL_BUDGET", "The analysis reached its model-call limit. Please retry.", 429, true);
   options.counts.modelCalls += 1;
   const response = await options.complete({ model: options.model, store: false, stream: false,
+    reasoning: reasoningForModel(options.model),
     instructions: options.instructions, input: [{ role: "user", content: options.evidence }],
     max_output_tokens: 6_000, text: { format: zodTextFormat(options.schema, options.name) },
   }, options.signal);
@@ -131,6 +149,7 @@ export async function understand(options: {
     options.report("Choosing relevant repository evidence");
     counts.modelCalls += 1;
     const response = await options.complete({ model: options.model, store: false, stream: false,
+      reasoning: reasoningForModel(options.model),
       instructions: INVESTIGATION_PROMPT, input, tools: REPOSITORY_TOOLS, parallel_tool_calls: false,
       max_output_tokens: 2_500, include: ["reasoning.encrypted_content"],
     }, signal);
@@ -167,7 +186,7 @@ export async function understand(options: {
   // Store inspected excerpts once; search traces and model reasoning are not evidence.
   const finalEvidence = evidence();
   if (finalEvidence.length > MAX_EVIDENCE_CHARS) throw new AppError("CONTEXT_BUDGET", "The retrieved evidence exceeded the safe context budget.", 413);
-  const analysis = await finalResult({ ...options, schema: AnalysisSchema, name: "issue_analysis", instructions: ANALYSIS_PROMPT, evidence: finalEvidence, sources: repository.sources });
+  const analysis = await finalResult({ ...options, schema: analysisOutputSchema(repository.sources), name: "issue_analysis", instructions: ANALYSIS_PROMPT, evidence: finalEvidence, sources: repository.sources });
   return { analysis, evidence: finalEvidence };
 }
 

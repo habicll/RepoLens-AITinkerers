@@ -3,7 +3,7 @@ import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 import { initialState, type Analysis, type IssueRef, type RepoLensState, type Solution, type Source } from "../shared/contracts.js";
 import { RepoLensAgent } from "../server/agent.js";
-import { understand, validateEvidence, type Complete, type ModelResponse, type RepositoryReader } from "../server/analysis.js";
+import { analysisOutputSchema, understand, validateEvidence, type Complete, type ModelResponse, type RepositoryReader } from "../server/analysis.js";
 import { AnalysisSessionStore } from "../server/session.js";
 import { AppError } from "../server/errors.js";
 
@@ -48,6 +48,24 @@ function lastState(events: BaseEvent[]): RepoLensState {
 }
 
 describe("evidence validation", () => {
+  it("requires bounded comment-backed discussion highlights only when comments exist", () => {
+    const comment: Source = { id: "comment:42", kind: "comment", url: `${issue.url}#issuecomment-42`, label: "Discussion", excerpt: "The expected behavior remains disputed." };
+    const schema = analysisOutputSchema([...sources, comment]);
+    const highlight = { text: "Participants disagree about the expected behavior.", sourceIds: [comment.id] };
+    expect(schema.safeParse(analysis).success).toBe(false);
+    expect(schema.safeParse({ ...analysis, facts: [analysis.summary] }).success).toBe(false);
+    expect(schema.safeParse({ ...analysis, facts: [{ ...highlight, sourceIds: ["comment:unknown"] }] }).success).toBe(false);
+    expect(schema.safeParse({ ...analysis, facts: [highlight] }).success).toBe(true);
+    expect(schema.safeParse({ ...analysis, facts: Array(4).fill(highlight) }).success).toBe(false);
+    expect(analysisOutputSchema(sources).safeParse(analysis).success).toBe(true);
+  });
+
+  it("rejects internal citation IDs in prose while accepting the same IDs in citation arrays", () => {
+    expect(() => validateEvidence(solution, sources)).not.toThrow();
+    expect(() => validateEvidence({ ...solution, approach: { ...solution.approach, text: "Investigate empty input. [file:parser]" } }, sources)).toThrow(/citation identifiers/);
+    expect(() => validateEvidence({ ...solution, openQuestions: ["What was intended? [issue:12]"] }, sources)).toThrow(/citation identifiers/);
+  });
+
   it("rejects fabricated source IDs and a file cited using a different file's evidence", () => {
     expect(() => validateEvidence(analysis, sources)).not.toThrow();
     expect(() => validateEvidence({ ...analysis, summary: { text: "Claim", sourceIds: ["invented"] } }, sources)).toThrow(/citation/);
@@ -117,6 +135,7 @@ describe("AG-UI execution", () => {
     expect(state.analysisId).toBeTruthy();
     expect(sessions.get(state.analysisId!, "thread-one", issue).state.analysis).toEqual(analysis);
     expect(complete.mock.calls.every(([request]) => request.store === false)).toBe(true);
+    expect(complete.mock.calls.every(([request]) => request.reasoning === undefined)).toBe(true);
   });
 
   it("checks URL identity and current page coherence before fetching or reasoning", async () => {
@@ -183,7 +202,7 @@ describe("bounded model workflow", () => {
       if (!request.tools) return response(JSON.stringify(analysis));
       return { status: "completed", output: Array.from({ length: 4 }, (_, index) => ({ type: "function_call" as const, name: "repo_overview", call_id: `call-${calls.length}-${index}`, arguments: '{"directory":null}' })) };
     };
-    const result = await understand({ issue, repository, model: "test", complete, signal: new AbortController().signal, counts, report: () => {}, deadline: Date.now() + 90_000 });
+    const result = await understand({ issue, repository, model: "gpt-5.4", complete, signal: new AbortController().signal, counts, report: () => {}, deadline: Date.now() + 90_000 });
     expect(result.analysis).toEqual(analysis);
     expect(counts.toolCalls).toBe(10);
     expect(counts.modelCalls).toBeLessThanOrEqual(6);
@@ -191,5 +210,6 @@ describe("bounded model workflow", () => {
     expect(calls.at(-1)?.tools).toBeUndefined();
     expect(calls.at(-1)?.text?.format?.type).toBe("json_schema");
     expect(calls.every(call => call.store === false)).toBe(true);
+    expect(calls.every(call => call.reasoning?.effort === "low")).toBe(true);
   });
 });
