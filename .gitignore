@@ -7,5 +7,6 @@ dist-extension/
 coverage/
 playwright-report/
 test-results/
+local-results/
 *.log
 .DS_Store

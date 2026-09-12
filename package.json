@@ -15,7 +15,9 @@
     "start": "tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:live": "tsx scripts/check-live.ts",
+    "check:secrets": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
